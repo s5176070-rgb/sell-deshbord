@@ -1,0 +1,20 @@
+# Prices, and the only market data source that needs no key.
+yfinance>=0.2.40
+pandas>=2.1          # rolling().rank(pct=True) - the percentile ranking is one
+                     # line because of it; on 2.0 it falls back to nothing.
+numpy>=1.26
+
+# breadth.py reads the S&P 500 membership table off Wikipedia. requests because
+# Wikipedia answers urllib's default user agent with a 403; lxml because
+# read_html needs a parser.
+requests>=2.31
+lxml>=5.2
+
+# alpha.py talks to Alpha Vantage over plain HTTP - requests again, no SDK.
+
+# Deliberately absent:
+#   any plotting library   the charts are hand-written SVG. matplotlib would
+#                          add 30MB to render six line charts that need to be
+#                          themed and hoverable in the browser anyway.
+#   python-dotenv          alpha.api_key() parses one line of .env.
+#   pytest                 each script carries its own --selftest.

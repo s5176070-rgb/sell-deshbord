@@ -1,0 +1,17 @@
+# The API key. First entry on purpose: `.env` is the one file here that must
+# never leave this machine, and a key committed once stays in the history.
+.env
+
+# Generated. Every one of these is rebuilt by running the scripts.
+dashboard*.html
+score.csv
+daily.log
+.last_analysis
+__pycache__/
+*.pyc
+
+# Gathered data. Cheap to rebuild, and breadth.csv is ~160KB of numbers that
+# would otherwise churn in every diff.
+breadth.csv
+alpha_putcall.csv
+alpha_context.json
