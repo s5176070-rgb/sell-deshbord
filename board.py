@@ -38,15 +38,15 @@ PEER = "#d97706"
 # good -> critical. Reserved: never reused as a series colour.
 STATUS = {"calm": "#0ca30c", "watch": "#fab219", "elevated": "#ec835a", "critical": "#d03b3b"}
 BAND_STATUS = {"0-44": "calm", "45-69": "watch", "70-84": "elevated", "85+": "critical"}
-# The page is Russian, and %b prints English month names whatever the locale of
+# The page is Hebrew, and %b prints English month names whatever the locale of
 # the machine that happens to build the file. Formatting them here keeps the
 # output identical on any box.
-RU_MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн",
-             "июл", "авг", "сен", "окт", "ноя", "дек"]
+RU_MONTHS = ["ינו", "פבר", "מרץ", "אפר", "מאי", "יונ",
+             "יול", "אוג", "ספט", "אוק", "נוב", "דצמ"]
 
 
 def ru_date(ts, year: bool = True) -> str:
-    out = f"{ts.day} {RU_MONTHS[ts.month - 1]}"
+    out = f"{ts.day} ב{RU_MONTHS[ts.month - 1]}"
     return f"{out} {ts.year}" if year else out
 BAND_MARK = {"0-44": "&#9679;", "45-69": "&#9650;", "70-84": "&#9670;", "85+": "&#9632;"}
 
@@ -278,7 +278,7 @@ def gauge(value: float, colour: str) -> str:
     xv, yv = point(start + sweep * max(0.0, min(100.0, value)) / 100)
     big = 1 if sweep * value / 100 > 180 else 0
     return (f'<svg viewBox="0 0 124 108" style="width:124px;height:108px;flex:none" '
-            f'role="img" aria-label="оценка риска {value:.0f} из 100">'
+            f'role="img" aria-label="ציון סיכון {value:.0f} מתוך 100">'
             f'<path d="M{x0:.1f},{y0:.1f} A{r},{r} 0 1 1 {x1:.1f},{y1:.1f}" fill="none" '
             f'stroke="var(--line)" stroke-width="9" stroke-linecap="round"/>'
             f'<path d="M{x0:.1f},{y0:.1f} A{r},{r} 0 {big} 1 {xv:.1f},{yv:.1f}" fill="none" '
@@ -297,7 +297,7 @@ REFRESH_JS = """
   function fail(btn, err, label){
     btn.classList.remove('busy');
     btn.classList.add('failed');
-    btn.textContent = 'Ошибка';
+    btn.textContent = 'שגיאה';
     say.textContent = String(err && err.message || err);
     setTimeout(function(){
       btn.classList.remove('failed');
@@ -308,7 +308,7 @@ REFRESH_JS = """
   }
 
   quick.addEventListener('click', async function(){
-    lock(true); quick.classList.add('busy'); quick.textContent = 'Загрузка\\u2026';
+    lock(true); quick.classList.add('busy'); quick.textContent = 'טוען\\u2026';
     try {
       var r = await fetch('/refresh', {method: 'POST'});
       if (!r.ok) throw new Error(await r.text());
@@ -322,7 +322,7 @@ REFRESH_JS = """
 
   if (!full) return;
   full.addEventListener('click', async function(){
-    lock(true); full.classList.add('busy'); full.textContent = 'Пересчёт\\u2026';
+    lock(true); full.classList.add('busy'); full.textContent = 'מחשב מחדש\\u2026';
     try {
       var r = await fetch('/analyze', {method: 'POST'});
       if (!r.ok) throw new Error(await r.text());
@@ -336,7 +336,7 @@ REFRESH_JS = """
         if (!s.running) {
           clearInterval(poll);
           if (s.error) { fail(full, new Error(s.error), labels.analyze); }
-          else { say.textContent = 'Готово'; location.reload(); }
+          else { say.textContent = 'הושלם'; location.reload(); }
         }
       } catch (err) { clearInterval(poll); fail(full, err, labels.analyze); }
     }, 1500);
@@ -345,148 +345,220 @@ REFRESH_JS = """
 """
 
 
-def simple(score: float, chance_now: float, base: float, ceiling: float, floor: float,
-           asof, px: pd.DataFrame, br: pd.DataFrame, days: int = 63,
-           live: bool = False, held_back: str | None = None,
-           history: pd.Series | None = None, month: int = 22,
-           far: dict | None = None) -> str:
-    """Three numbers and six pictures. Nothing else.
+BROADSHEET_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap');
+:root{
+  --color-bg:#f3f2f2; --color-surface:#eae9e9; --color-text:#201e1d;
+  --color-accent:#0088b0; --color-accent-2:#d6006c;
+  --color-divider:color-mix(in srgb, #201e1d 16%, transparent);
+  --color-accent-2-100:#fff1f4; --color-accent-2-800:#790e3d;
+  --color-neutral-100:#f8f4f4; --color-neutral-300:#d7d3d3; --color-neutral-800:#444141;
+  --font-heading:"Source Serif 4",system-ui,sans-serif; --font-body:"Source Serif 4",system-ui,sans-serif;
+  --space-1:5px; --space-2:10px; --space-3:15px; --space-4:20px; --space-6:30px; --space-8:40px;
+  --radius-sm:1px; --radius-md:2px;
+  --good:#1a7f4b; --warn:#b5820a; --crit:#b3261e;
+  /* Aliases so plot()/panel() - built for the dark dashboard - render correctly
+     here too, unchanged: they paint with these var names directly. */
+  --line:var(--color-divider); --base:var(--color-divider);
+  --mut:color-mix(in srgb, var(--color-text) 55%, transparent);
+  --ink:var(--color-text); --ink2:color-mix(in srgb, var(--color-text) 75%, transparent);
+}
+html{color-scheme:light}
+body{background:var(--color-bg);color:var(--color-text);margin:0;font:15px/1.55 var(--font-body)}
+a{color:var(--color-accent);text-underline-offset:3px}
+h1,h2,h3,h4{font-family:var(--font-heading);font-weight:600;line-height:1.12;
+  letter-spacing:-0.015em;margin:0 0 var(--space-2)}
+h2{font-size:26px} h3{font-size:18px}
+.text-muted,.note{color:color-mix(in srgb, var(--color-text) 55%, transparent)}
 
-    The dial runs 0 to 100 against the model's own observed range, so it is
-    worth watching day to day. On its own it would still mislead: 0 reads as
-    "no risk" when it means "the calmest this has ever been", which is a 5%
-    chance, not none. So the chance sits beside it at the same size, and the
-    ordinary day sits beside that, because a probability without something to
-    compare it against is a number nobody can act on.
+.nav{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) var(--space-4)}
+.nav-brand{font-family:var(--font-heading);font-weight:600;font-size:18px}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;
+  font-family:var(--font-heading);font-weight:600;font-size:14px;line-height:1.2;color:var(--color-text);
+  background:transparent;border:1px solid transparent;padding:var(--space-2) 18px;border-radius:var(--radius-md)}
+.btn-primary{background:var(--color-accent);color:#fff}
+.btn-primary:hover{background:#006786}
+.btn-secondary{border-color:var(--color-divider)}
+.btn-secondary:hover{background:color-mix(in srgb, var(--color-text) 7%, transparent)}
+.btn[disabled]{cursor:progress;opacity:.7}
+.btn.busy{background:var(--color-neutral-300);color:var(--color-text)}
+.btn.failed{background:var(--crit);color:#fff}
+@media (prefers-reduced-motion:no-preference){
+  .btn.busy{animation:pulse 1.1s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.55}}
+}
+
+.card{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-3);
+  border-radius:var(--radius-md);background:var(--color-surface)}
+.card-kicker{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent)}
+.card-title{font-family:var(--font-heading);font-weight:600;font-size:20px;line-height:1.2}
+
+.tag{display:inline-flex;align-items:center;font-size:11px;letter-spacing:.02em;padding:3px 10px;
+  border-radius:2px}
+.tag-accent-2{background:var(--color-accent-2-100);color:var(--color-accent-2-800)}
+.tag-neutral{background:var(--color-neutral-100);color:var(--color-neutral-800)}
+
+.only{max-width:1080px;margin:0 auto;padding:var(--space-8) var(--space-6)}
+#jobstep{font-size:12.5px;color:var(--color-text);opacity:.7}
+
+/* — the six-chart grid, reusing panel()/plot() from the dark dashboard as-is —
+   only the colours above changed underneath them. */
+.panels{display:grid;gap:var(--space-3);grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.panel h3{font-size:15px;margin:0 0 2px;font-family:var(--font-heading);font-weight:600}
+.panel .cap{color:color-mix(in srgb, var(--color-text) 55%, transparent);font-size:11.5px;margin:0 0 10px}
+.plot{position:relative}
+.plot svg{width:100%;height:132px;display:block}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;
+  color:color-mix(in srgb, var(--color-text) 70%, transparent);margin-top:9px}
+.legend i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:5px;border-radius:1px}
+.tip{position:absolute;pointer-events:none;opacity:0;transition:opacity .08s;
+  background:#fff;border:1px solid var(--color-divider);border-radius:7px;padding:7px 9px;
+  font-size:11.5px;color:var(--color-text);white-space:nowrap;z-index:5;
+  box-shadow:0 6px 18px rgba(32,30,29,.16)}
+.tip .d{color:color-mix(in srgb, var(--color-text) 55%, transparent);margin-bottom:3px}
+.tip .r{display:flex;gap:7px;align-items:center;font-variant-numeric:tabular-nums}
+.tip .r i{width:9px;height:9px;border-radius:50%;flex:none}
+.tip .r span{color:color-mix(in srgb, var(--color-text) 70%, transparent)}
+.tip .r b{margin-left:auto;font-weight:600}
+"""
+
+
+def score_chart(history: pd.Series, sessions: int = 250) -> str:
+    """The score's own history, full window, no hover - a plain read of whether
+    today's marked dot sits near the quiet end of the line or the busy one.
     """
-    frac = max(0.0, min(1.0, score / 100))
-    colour = ("var(--good)" if frac < 0.34 else
-              "var(--warn)" if frac < 0.67 else "var(--crit)")
-    versus = ("ниже" if chance_now < base * 0.9 else
-              "выше" if chance_now > base * 1.1 else "около")
-    times = chance_now / base if base else 1.0
-    return f"""<title>Риск падения рынка</title>
-<style>{CSS}
-.only{{max-width:1060px;margin:0 auto;padding:26px 22px 44px}}
-.head{{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));
-  margin-bottom:16px}}
-.big-wrap{{display:flex;gap:20px;align-items:center;
-  background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 26px}}
-.big-num{{font-size:74px;font-weight:600;line-height:1}}
-.num2{{font-size:46px;font-weight:600;line-height:1;margin:8px 0 4px}}
-.num2 sup{{font-size:20px;font-weight:500;vertical-align:super;margin-left:1px}}
-.cell{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 24px;
-  display:flex;flex-direction:column;justify-content:center}}
-.cell .k{{font-size:12.5px;color:var(--ink2)}}
-.cell .w{{font-size:11.5px;color:var(--mut);line-height:1.5}}
-.scale{{font-size:11.5px;color:var(--mut);margin-top:8px}}
-.waiting{{font-size:11.5px;color:var(--warn);margin-top:8px;max-width:26ch;line-height:1.45}}
-.wide{{grid-template-columns:1fr;margin-bottom:14px}}
-.bar-top{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}}
-.bar-top .stamp{{font-size:12px;color:var(--mut);margin-left:auto;text-align:right;
-  max-width:44ch;line-height:1.45}}
-#jobstep{{font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums}}
-.bar-top button{{font:inherit;font-size:12.5px;font-weight:600;border:0;border-radius:7px;
-  padding:8px 16px;cursor:pointer}}
-#refresh{{color:var(--ink);background:var(--subject)}}
-#analyze{{color:var(--ink2);background:transparent;box-shadow:inset 0 0 0 1px var(--base)}}
-.bar-top button:hover{{filter:brightness(1.15)}}
-.bar-top button:focus-visible{{outline:2px solid var(--ink);outline-offset:2px}}
-.bar-top button[disabled]{{cursor:progress;opacity:.7}}
-.bar-top button.failed{{background:var(--crit);color:var(--ink);box-shadow:none}}
-.bar-top button.busy{{background:var(--base);color:var(--ink2);box-shadow:none}}
-@media (prefers-reduced-motion:no-preference){{
-  .bar-top button.busy{{animation:pulse 1.1s ease-in-out infinite}}
-  @keyframes pulse{{50%{{opacity:.55}}}}
-}}
-</style>
-<div class="only">
-  {'''<div class="bar-top">
-    <button id="refresh" type="button">Обновить</button>
-    <button id="analyze" type="button">Пересчитать</button>
-    <span id="jobstep"></span>
-    <span class="stamp">Обновить &mdash; заново скачивает цены и пересчитывает оценку,
-      несколько секунд. Пересчитать &mdash; также заново считает широту рынка по всем
-      500 компаниям и загружает историю опционов в пределах дневного лимита,
-      несколько минут.</span>
-  </div>''' if live else ''}
-  <div class="head">
-    <div class="big-wrap">
-      {gauge(score, colour)}
-      <div>
-        <div class="big-num" style="color:{colour}">{score:.0f}</div>
-        <div class="scale">оценка, 0&ndash;100<br>на {ru_date(asof)}</div>
-        {f'<div class="waiting">&#9432; {held_back}</div>' if held_back else ''}
-      </div>
-    </div>
-    <div class="cell">
-      <div class="k">Вероятность падения на 5% в течение месяца</div>
-      <div class="num2" style="color:{colour}">{chance_now:.0f}<sup>%</sup></div>
-      <div class="w">Что оценка означает на деле: из ста дней, похожих на сегодняшний,
-        столько упало.</div>
-    </div>
-    {far_cell(far)}
-    <div class="cell">
-      <div class="k">В обычный день</div>
-      <div class="num2" style="color:var(--ink2)">{base:.0f}<sup>%</sup></div>
-      <div class="w">Сегодня <b style="color:var(--ink)">{versus}</b> нормы
-        &mdash; {times:.1f}&times; от обычной вероятности. Оценка равна 0 при значении
-        {floor:.0f}% и 100 при {ceiling:.0f}% &mdash; самый спокойный и самый тяжёлый
-        день за пятнадцать лет.</div>
-    </div>
-  </div>
-  {track(history, month) if history is not None else ''}
-  {panels(px, br, days=days)}
-</div>
-<script>{JS}{REFRESH_JS if live else ''}</script>"""
-
-
-def track(history: pd.Series, month: int = 22) -> str:
-    """The score itself over the last month, against the bands it moves between.
-
-    The three hairlines are the band edges, so the line is read as a position
-    rather than a number: crossing 45 is the whole event, and a move from 8 to
-    26 that never leaves the calm band is not.
-    """
-    recent = history.dropna().tail(month)
+    recent = history.dropna().tail(sessions)
     if len(recent) < 2:
         return ""
-    # The range, not the net move: this month opened at 28 and closed at 28
-    # having been to 46 and to 0 in between, and "unchanged" would be a true
-    # sentence that describes none of it.
-    return ('<div class="panels wide">' + panel(
-        "Оценка за последний месяц",
-        f"{len(recent)} сессий, {ru_date(recent.index[0], year=False)} &mdash; "
-        f"{ru_date(recent.index[-1], year=False)}. "
-        f"Минимум {recent.min():.0f}, максимум {recent.max():.0f}, "
-        f"сейчас {recent.iloc[-1]:.0f}. Линии &mdash; границы зон.",
-        {"Оценка": (recent, SUBJECT)}, days=month, refs=[45, 70, 85]) + "</div>")
+    w, h, pad = 800.0, 220.0, 12.0
+
+    def y(v: float) -> float:
+        return h - pad - v / 100 * (h - 2 * pad)
+
+    n = len(recent)
+    xs = [i / (n - 1) * w for i in range(n)]
+    ys = [y(float(v)) for v in recent]
+    refs = "".join(
+        f'<line x1="0" y1="{y(r):.1f}" x2="{w:.0f}" y2="{y(r):.1f}" '
+        f'stroke="var(--color-divider)" stroke-width="1"/>'
+        f'<text x="4" y="{y(r) - 4:.1f}" font-size="11" fill="var(--color-text)" opacity="0.5">{r:g}</text>'
+        for r in (45, 70, 85))
+    line = ('<polyline points="' + " ".join(f"{a:.1f},{b:.1f}" for a, b in zip(xs, ys)) +
+            '" fill="none" stroke="var(--color-text)" stroke-width="2"/>')
+    dot = f'<circle cx="{xs[-1]:.1f}" cy="{ys[-1]:.1f}" r="4" fill="var(--color-accent-2)"/>'
+    return (f'<svg viewBox="0 0 {w:.0f} {h:.0f}" style="width:100%;height:{h:.0f}px;display:block" '
+            f'role="img" aria-label="היסטוריית ציון, {n} מפגשים">{refs}{line}{dot}</svg>')
 
 
-def far_cell(far: dict | None) -> str:
-    """Today against 26 years, in one cell. Absent silently if the run failed.
-
-    A different ruler than the headline chance on purpose: that one is the
-    walk-forward model on 2012-2026, this one is eleven long-lived factors
-    against everything back to the dot-com top. Two eras, two base rates -
-    which is why this prints its own base beside the analog rate instead of
-    borrowing the headline's.
+def simple(score: float, chance_now: float, base: float, ceiling: float, floor: float,
+           asof, px: pd.DataFrame, res: pd.DataFrame, chosen: list[str],
+           br: pd.DataFrame, days: int = 63,
+           live: bool = False, held_back: str | None = None,
+           history: pd.Series | None = None, far: dict | None = None) -> str:
+    """One screen: today's score and its factors, charts only - no tables.
+    Broadsheet design system (light, RTL, serif) - the handoff in
+    design_handoff_market_stress_dashboard/, recreated with real values.
     """
-    if not far:
-        return ""
-    tone = ("var(--good)" if far["lift"] < 0.9 else
-            "var(--warn)" if far["lift"] <= 1.5 else "var(--crit)")
-    word = ("спокойнее" if far["lift"] < 0.9 else
-            "на уровне" if far["lift"] <= 1.1 else "хуже")
-    return f"""<div class="cell">
-      <div class="k">Против 26 лет истории</div>
-      <div class="num2" style="color:{tone}">{far["lift"]:.2f}&times;</div>
-      <div class="w">Из {far["days"]:,} дней с 2000 года, похожих на сегодняшний,
-        {far["near_rate"]:.0%} упали на 5%+ в течение месяца, против
-        {far["base"]:.0%} в произвольный день &mdash;
-        <b style="color:var(--ink)">{word}</b> обычной долгосрочной вероятности.
-        Одиннадцать факторов, включая крах доткомов и 2008 год.</div>
-    </div>"""
+    last = res.iloc[-1]
+    regime = str(last["regime"])
+    tag_class = "tag-neutral" if regime == "NORMAL" else "tag-accent-2"
+    versus = ("נמוך מהנורמה" if chance_now < base * 0.9 else
+              "גבוה מהנורמה" if chance_now > base * 1.1 else "קרוב לנורמה")
+    times = chance_now / base if base else 1.0
+
+    nav_buttons = ('<button id="refresh" type="button" class="btn btn-primary">רענון</button>'
+                   '<button id="analyze" type="button" class="btn btn-secondary">חישוב מחדש</button>'
+                   '<span id="jobstep"></span>') if live else ""
+
+    readings = sorted(((k, float(last[k])) for k in chosen if pd.notna(last[k])),
+                       key=lambda kv: abs(kv[1] - 50), reverse=True)
+    top_readings = readings[:8]
+    extreme = top_readings[0][0] if top_readings else None
+    bars = "".join(
+        f'<div style="display:grid;grid-template-columns:1fr 34px;gap:var(--space-2);'
+        f'align-items:center;margin-bottom:var(--space-3)">'
+        f'<div><div style="font-size:13px;margin-bottom:4px">{k}</div>'
+        f'<div style="height:8px;background:var(--color-bg);border-radius:var(--radius-sm);overflow:hidden">'
+        f'<div style="height:100%;width:{max(0.0, min(100.0, v)):.0f}%;'
+        f'background:{"var(--color-accent-2)" if k == extreme else "var(--color-text)"}"></div></div></div>'
+        f'<span style="font-size:13px" dir="ltr">{v:.0f}</span></div>'
+        for k, v in top_readings)
+
+    mss5, mss10 = float(last["MSS_5d"]), float(last["MSS_10d"])
+    since2000 = ""
+    if far:
+        word = ("רגוע יותר" if far["lift"] < 0.9 else
+                "בקו עם" if far["lift"] <= 1.1 else "גרוע יותר מ")
+        since2000 = (f'<p class="text-muted" style="font-size:13px;margin:0 0 var(--space-2)">'
+                     f'מול 26 שנות היסטוריה: מתוך {far["days"]:,} ימים דומים מאז שנת 2000, '
+                     f'<span dir="ltr">{far["near_rate"]:.0%}</span> מהם נפלו 5%+ תוך חודש '
+                     f'(לעומת <span dir="ltr">{far["base"]:.0%}</span> ביום אקראי) &mdash; '
+                     f'{word} מהרגיל. אחד עשר גורמים לטווח ארוך, כולל התרסקות הדוט-קום ו-2008.</p>')
+
+    return f"""<title>סיכון לנפילת השוק</title>
+<style>{BROADSHEET_CSS}</style>
+<div dir="rtl" lang="he" style="background:var(--color-bg);color:var(--color-text);min-height:100vh">
+<nav class="nav">
+  <span class="nav-brand">MSS</span>
+  <div style="flex:1"></div>
+  {nav_buttons}
+</nav>
+<main class="only">
+
+  <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-1)">
+    <h1 style="font-size:88px;margin:0;line-height:1" dir="ltr">{score:.0f}</h1>
+    <span class="tag {tag_class}" dir="ltr">{regime}</span>
+  </div>
+  <p class="text-muted" style="margin:0 0 var(--space-1);font-size:15px">ציון פגיעות מצרפי (MSS), 0&ndash;100</p>
+  <p class="text-muted" style="margin:0 0 var(--space-1);font-size:13px">{ru_date(asof)} &middot;
+    {len(chosen)} גורמים &middot; שינוי 5 ימים <span dir="ltr">{mss5:+.1f}</span> &middot;
+    10 ימים <span dir="ltr">{mss10:+.1f}</span></p>
+  {f'<p style="color:var(--warn);font-size:13px;margin:0 0 var(--space-1)">&#9432; {held_back}</p>' if held_back else ''}
+  {since2000}
+  <p class="text-muted" style="margin:0 0 var(--space-2);font-size:14px;max-width:70ch">
+    מה הציון אומר בפועל: מתוך מאה ימים שדומים להיום, <span dir="ltr">{chance_now:.0f}%</span>
+    נפלו 5% ומעלה תוך חודש.</p>
+  <p class="text-muted" style="margin:0 0 var(--space-8);font-size:14px;max-width:70ch">
+    היום <b style="color:var(--color-text)">{versus}</b> &mdash; פי
+    <span dir="ltr">{times:.1f}</span> מההסתברות הרגילה של <span dir="ltr">{base:.0f}%</span>.
+    הציון עצמו שווה 0 בערך של <span dir="ltr">{floor:.0f}%</span> ו-100 בערך של
+    <span dir="ltr">{ceiling:.0f}%</span> &mdash; היום הכי רגוע והכי קשה בחמש עשרה השנים האחרונות.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:var(--space-3);margin-bottom:var(--space-8)">
+    <div class="card"><div class="card-kicker">ציון</div><div class="card-title" dir="ltr">{score:.0f}</div></div>
+    <div class="card"><div class="card-kicker">רג׳ים</div><div class="card-title" dir="ltr">{regime}</div></div>
+    <div class="card"><div class="card-kicker" dir="ltr">P(-5% ב-20d)</div><div class="card-title" dir="ltr">{chance_now:.0f}%</div></div>
+    <div class="card"><div class="card-kicker">&Delta; 5 ימים</div><div class="card-title" dir="ltr">{mss5:+.1f}</div></div>
+    <div class="card"><div class="card-kicker">&Delta; 10 ימים</div><div class="card-title" dir="ltr">{mss10:+.1f}</div></div>
+    <div class="card"><div class="card-kicker">פיזור גורמים</div><div class="card-title" dir="ltr">{last['dispersion']:.0f}</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:var(--space-8);margin-bottom:var(--space-8)">
+    <div>
+      <h3>ציון MSS &middot; 250 מפגשים אחרונים</h3>
+      {score_chart(history) if history is not None else ''}
+      <p class="note" style="font-size:12px;margin-top:var(--space-2)">הקווים מסמנים את גבולות הרג׳ים
+        (45 / 70 / 85). הנקודה המסומנת היא הקריאה הנוכחית.</p>
+    </div>
+    <div>
+      <h3>גורמים בולטים היום</h3>
+      <div>{bars}</div>
+      <p class="note" style="font-size:12px;margin-top:var(--space-2)">שמונת הגורמים הרחוקים ביותר
+        מהאמצע, מתוך {len(chosen)} בשימוש היום.</p>
+    </div>
+  </div>
+
+  <h2>אינדיקטורים נוספים</h2>
+  <div style="margin-bottom:var(--space-8)">{panels(px, br, days=days)}</div>
+
+  <p style="font-style:italic;max-width:640px;font-size:14px">הציון מנבא את עומק הנפילה, לא את הכיוון.
+    תשואת 20 הימים הקדימה מהדלי העליון אינה שלילית באופן עקבי &mdash; קריאה גבוהה טוענת לנשיאת סיכון
+    נמוך יותר, לא לקריאת שיא.</p>
+
+</main>
+</div>
+<script>{JS}{REFRESH_JS if live else ''}</script>"""
 
 
 def band_of(score: float) -> str:
@@ -515,30 +587,30 @@ def panels(px: pd.DataFrame, br: pd.DataFrame, days: int = 500) -> str:
     s5fi = br["s5fi"].reindex(px.index) if not br.empty else pd.Series(dtype=float)
     s5th = br["s5th"].reindex(px.index) if not br.empty else pd.Series(dtype=float)
     return '<div class="panels">' + "".join([
-        panel("S&amp;P 500 и его средние",
-              "Три средних &mdash; одна цветовая шкала, потому что это упорядоченный набор.",
-              {"SPX": (spx, SUBJECT), "50 дней": (spx.rolling(50).mean(), RAMP[0]),
-               "150 дней": (spx.rolling(150).mean(), RAMP[1]),
-               "200 дней": (spx.rolling(200).mean(), RAMP[2])}, days=days),
-        panel("Равный вес против взвешенного по капитализации",
-              "RSP к SPY. Падение означает, что индекс тянут всё меньше компаний.",
-              {"RSP/SPY": (rsp_spy, SUBJECT), "100 дней": (rsp_spy.rolling(100).mean(), RAMP[2])},
+        panel("S&amp;P 500 והממוצעים שלו",
+              "שלושה ממוצעים &mdash; סולם צבע אחד, כי זו סדרה מסודרת.",
+              {"SPX": (spx, SUBJECT), "50 ימים": (spx.rolling(50).mean(), RAMP[0]),
+               "150 ימים": (spx.rolling(150).mean(), RAMP[1]),
+               "200 ימים": (spx.rolling(200).mean(), RAMP[2])}, days=days),
+        panel("משקל שווה מול משוקלל לפי שווי שוק",
+              "RSP מול SPY. ירידה פירושה שפחות ופחות חברות מובילות את המדד.",
+              {"RSP/SPY": (rsp_spy, SUBJECT), "100 ימים": (rsp_spy.rolling(100).mean(), RAMP[2])},
               days=days),
-        panel("Волатильность",
-              "Читается как режим, а не как уровень. Низкая &mdash; спокойно, но это не то же самое, что безопасно.",
-              {"VIX": (px["^VIX"], SUBJECT), "20 дней": (px["^VIX"].rolling(20).mean(), RAMP[2])},
+        panel("תנודתיות",
+              "נקרא כמשטר, לא כרמה. נמוך &mdash; רגוע, אבל זה לא אותו דבר כמו בטוח.",
+              {"VIX": (px["^VIX"], SUBJECT), "20 ימים": (px["^VIX"].rolling(20).mean(), RAMP[2])},
               days=days, refs=[13, 20]),
-        panel("Защитная ротация",
-              "Товары первой необходимости против индекса: деньги тихо отходят в сторону.",
-              {"XLP/SPX": (xlp_spx, SUBJECT), "EMA 20 дней": (xlp_spx.ewm(span=20).mean(), RAMP[2])},
+        panel("רוטציה הגנתית",
+              "מוצרי צריכה בסיסיים מול המדד: הכסף זז בשקט הצידה.",
+              {"XLP/SPX": (xlp_spx, SUBJECT), "EMA 20 ימים": (xlp_spx.ewm(span=20).mean(), RAMP[2])},
               days=days),
-        panel("Аппетит к риску",
-              "Дискреционное против необходимого &mdash; что люди покупают по выбору, а что вынужденно.",
-              {"XLY/XLP": (xly_xlp, SUBJECT), "50 дней": (xly_xlp.rolling(50).mean(), RAMP[2])},
+        panel("תיאבון לסיכון",
+              "צריכה מרצון מול צריכה הכרחית &mdash; מה אנשים קונים מבחירה ומה מתוך הכרח.",
+              {"XLY/XLP": (xly_xlp, SUBJECT), "50 ימים": (xly_xlp.rolling(50).mean(), RAMP[2])},
               days=days),
-        panel("Широта рынка",
-              "Доля из 500 компаний выше собственной средней. Посчитано по составу индекса, а не через прокси.",
-              {"выше 50-дневной": (s5fi, SUBJECT), "выше 200-дневной": (s5th, PEER)},
+        panel("רוחב השוק",
+              "אחוז מתוך 500 החברות שמעל הממוצע הנע שלהן. מחושב לפי הרכב המדד, לא דרך פרוקסי.",
+              {"מעל ממוצע 50 יום": (s5fi, SUBJECT), "מעל ממוצע 200 יום": (s5th, PEER)},
               days=days, refs=[15, 70], unit="%"),
     ]) + "</div>"
 

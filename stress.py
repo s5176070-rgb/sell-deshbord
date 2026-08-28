@@ -501,14 +501,14 @@ def build(a, live: bool = False) -> str | None:
         # distance shrinks to one and hides exactly the outage it should show.
         # ponytail: business days, so a market holiday reads one session late.
         gap = len(pd.bdate_range(keep, res.index[-1])) - 1
-        # The page is Russian, so the notice on it is too. The stderr line
+        # The page is Hebrew, so the notice on it is too. The stderr line
         # below stays English - that one is for the log, not the reader.
-        held_back = (f"На {board.ru_date(res.index[-1], year=False)} доступно лишь "
-                     f"{share:.0%} факторов "
-                     + ("&mdash; сессия ещё открывается. Показан последний полный день."
+        held_back = (f"ל-{board.ru_date(res.index[-1], year=False)} זמינים רק "
+                     f"{share:.0%} מהגורמים "
+                     + ("&mdash; המסחר עדיין נפתח. מוצג היום המלא האחרון."
                         if gap <= 1 else
-                        f"&mdash; лента цен неполна уже {gap} сессий. Показано "
-                        f"{board.ru_date(keep, year=False)}, последний полный день."))
+                        f"&mdash; פס המחירים חסר כבר {gap} מפגשים. מוצג "
+                        f"{board.ru_date(keep, year=False)}, היום המלא האחרון."))
         print(f"{res.index[-1]:%Y-%m-%d} had only {share:.0%} of the factors reporting - "
               f"reading {keep:%Y-%m-%d} instead", file=sys.stderr)
         res = res.loc[:keep]
@@ -577,7 +577,7 @@ def build(a, live: bool = False) -> str | None:
                         float(export["chance_pct"].iloc[-1]),
                         float(ev.loc["all days", "rate"]),  # the everyday chance
                         curve["rate"].max(), curve["rate"].min(),
-                        res.index[-1], px, br, a.days, live, held_back,
+                        res.index[-1], px, res, chosen, br, a.days, live, held_back,
                         history=export["score"], far=far)
 
 
