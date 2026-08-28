@@ -215,6 +215,15 @@ def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
         # fewer and fewer names come with it.
         c["breadth_divergence"] = spx.pct_change(20).rank(pct=True) - s5th.rank(pct=True) / 100
 
+        if "s5nh" in br.columns:
+            # CNN Fear & Greed's "stock price strength" leg, not a proxy for it:
+            # the net share of the index at a fresh 52-week high against a fresh
+            # 52-week low. Falling means fewer names are leading and more are
+            # breaking down, whatever the index itself is doing.
+            nh = br["s5nh"].reindex(px.index).ffill(limit=5)
+            nl = br["s5nl"].reindex(px.index).ffill(limit=5)
+            c["breadth_nhnl"] = -(nh - nl)
+
     if pc is not None and len(pc) >= alpha.NEED_ROWS:
         # Options positioning, and it only gets here once alpha.py has gathered
         # enough days to rank against a trailing year. Below that the gate in

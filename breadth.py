@@ -34,6 +34,10 @@ CSV = Path(__file__).with_name("breadth.csv")
 WIKI = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 START = "2005-01-01"
 WINDOWS = {"s5fi": 50, "s5th": 200}
+# CNN Fear & Greed's "stock price strength" leg: not distance from an average
+# (that's s5th) but how many names are printing fresh 52-week highs against
+# how many are printing fresh 52-week lows. A year of trading sessions.
+HILO_WINDOW = 252
 # Below this many reporting names a day is a data artefact, not a market.
 MIN_NAMES = 300
 # A day is also rejected when its universe shrinks against its own recent norm.
@@ -79,6 +83,16 @@ def shares(px: pd.DataFrame) -> pd.DataFrame:
         reporting = px.notna() & px.rolling(window, min_periods=window).mean().notna()
         out[name] = above.sum(axis=1) / reporting.sum(axis=1) * 100
         out[f"{name}_n"] = reporting.sum(axis=1)
+
+    roll_max = px.rolling(HILO_WINDOW, min_periods=HILO_WINDOW).max()
+    roll_min = px.rolling(HILO_WINDOW, min_periods=HILO_WINDOW).min()
+    reporting_hilo = px.notna() & roll_max.notna()
+    at_high = (px >= roll_max) & reporting_hilo
+    at_low = (px <= roll_min) & reporting_hilo
+    n_hilo = reporting_hilo.sum(axis=1)
+    out["s5nh"] = at_high.sum(axis=1) / n_hilo * 100
+    out["s5nl"] = at_low.sum(axis=1) / n_hilo * 100
+    out["s5nh_n"] = n_hilo
     return pd.DataFrame(out).round(2)
 
 
@@ -122,6 +136,11 @@ def selftest() -> None:
     last = shares(px).iloc[-1]
     assert last["s5th_n"] == 3, f"LATE has no 200-day average yet: {last['s5th_n']}"
     assert abs(last["s5th"] - 200 / 3) < 0.1, last["s5th"]
+    # UP1/UP2 are strictly rising - always their own 252-day high. DOWN's one-day
+    # drop to 1.0 is a new low against the flat 100.0 that preceded it. LATE still
+    # has no 252-day window and must not count in either share.
+    assert abs(last["s5nh"] - 2 / 3 * 100) < 0.1, last["s5nh"]
+    assert abs(last["s5nl"] - 1 / 3 * 100) < 0.1, last["s5nl"]
 
     # A day whose universe collapses is rejected, not averaged over a different
     # set of companies than the day before it.
