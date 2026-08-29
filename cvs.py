@@ -7,6 +7,17 @@ So the dashboard prints the forward table beside the gauge. If the >85 bucket
 does not lead to worse forward drawdowns than the <45 bucket, the number on
 the gauge is decoration and should be read as decoration.
 
+THE TEST WAS RUN AND THE SCORE FAILED IT. The >85 bucket did not separate
+from the <45 bucket by enough to trade on, and `stress.py` replaced this
+score with the Market Stress Score, which holds 1.9x the base rate above 85
+walk-forward and reads drawdown risk rather than direction. The gauge here is
+decoration; that is now measured, not hypothetical.
+
+This module is NOT dead, and it is not kept for the score. Six files import
+its data layer - `closes`, `pct_rank`, `forward`, `patch`, `regimes`, `stale`
+and `HORIZONS` - and those are sound and well tested. Import from here freely.
+Build nothing new on the score itself.
+
 Deliberately not here yet: a data-quality layer, a second price source, a
 config file, a regime state machine, real breadth. Those are worth building
 for a signal that works, and worth nothing for one that does not. Run
