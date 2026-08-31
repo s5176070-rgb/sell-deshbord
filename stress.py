@@ -37,6 +37,7 @@ import pandas as pd
 import alpha
 import board
 import breadth
+import valuation
 from cvs import closes, forward, patch, pct_rank, regimes, stale
 
 TICKERS = ["^GSPC", "^VIX", "^VIX3M", "^VVIX", "RSP", "SPY", "XLY", "XLP", "XLU", "HYG",
@@ -75,7 +76,7 @@ STAMP = Path(__file__).with_name(".last_analysis")
 
 
 def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
-               pc: pd.DataFrame | None = None) -> pd.DataFrame:
+               pc: pd.DataFrame | None = None, val: pd.DataFrame | None = None) -> pd.DataFrame:
     """Every raw reading worth testing. Higher must mean *more* stress, always.
 
     Signs are set here and nowhere else, so the bench measures direction as
@@ -236,6 +237,25 @@ def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
         c["puts_heavy"] = chain
         c["puts_light"] = -chain
         c["puts_change_20"] = -chain.diff(20)
+
+    if val is not None and not val.empty:
+        # Trailing S&P 500 P/E (see valuation.py) - the same question the
+        # Yardeni forward-earnings tape asks, priced off what the index has
+        # actually earned rather than what analysts expect it to. Monthly
+        # readings mostly land on the 1st, which is rarely itself a trading
+        # day - a plain reindex().ffill() would drop those rows before there
+        # is anything to fill from, so the lookup has to happen during the
+        # reindex (method="ffill"), not after it. The live edge adds an
+        # in-progress "today" row on top of the 1st-of-month one, so the gap
+        # between two real readings can run to about 40 trading days, not 21.
+        pe = val["pe"].reindex(px.index, method="ffill", limit=50)
+        c["pe_stretch"] = pe
+        # A five-year-average version (the sharper "stretched even by this
+        # market's own recent standard" question) was tried and dropped: its
+        # rolling window needs five years warmed up in every column at once
+        # for `hist = ranked.dropna()` below, which cost the whole bench its
+        # pre-2012 training history for a factor that still did not clear the
+        # bar. Not worth what it took from every other candidate.
     return c
 
 
@@ -483,7 +503,11 @@ def build(a, live: bool = False) -> str | None:
     if 0 < len(pc) < alpha.NEED_ROWS:
         print(f"put/call history is {len(pc)} rows, needs {alpha.NEED_ROWS} "
               f"before it can be ranked - left out of the score", file=sys.stderr)
-    ranked = candidates(px, br, pc).apply(pct_rank, lookback=a.lookback)
+    val = valuation.load()
+    if val.empty:
+        print("no valuation.csv - running without pe_stretch; "
+              "build it with `python valuation.py`", file=sys.stderr)
+    ranked = candidates(px, br, pc, val).apply(pct_rank, lookback=a.lookback)
     # Selection and the walk-forward want complete rows; the live reading does
     # not, and must not be dragged a month back by one lagging feed.
     hist = ranked.dropna()
