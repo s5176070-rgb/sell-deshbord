@@ -1,0 +1,46 @@
+# Every script here carries its own --selftest instead of a pytest suite, and
+# each one builds its frames in memory: no network, no key, no fixture files.
+# That is the whole reason this workflow can exist at all - the model itself
+# cannot be checked here, because scoring it needs Yahoo and a warm breadth.csv.
+# What CI can prove is that the logic under those numbers still holds.
+name: selftests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # a break on one version should not hide the other
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      # A syntax error in any file is worth catching before the selftests do,
+      # because it names the file and the line rather than an import traceback.
+      - name: Compile every module
+        run: python -m compileall -q .
+
+      # Named one at a time, not a loop, so a red check names the script that
+      # failed in the job list instead of hiding it inside one step's log.
+      - run: python cvs.py --selftest
+      - run: python stress.py --selftest
+      - run: python alpha.py --selftest
+      - run: python breadth.py --selftest
+      - run: python valuation.py --selftest

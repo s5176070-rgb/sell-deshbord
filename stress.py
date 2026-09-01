@@ -316,12 +316,14 @@ def score(ranked: pd.DataFrame, chosen: list[str]) -> pd.DataFrame:
     out["dispersion"] = ranked[chosen].std(axis=1)
     out["regime"] = regimes(out["MSS"])
     # The flag sits at 85, and the honest reason is not that 85 is better than
-    # 70. On the current walk-forward the top two bands are indistinguishable -
-    # 1.69x at 70-84 against 1.67x at 85+, on 445 and 112 days - and earlier
-    # runs had them the other way round. At equal lift the choice is only how
-    # often you want to be told: 85 fires on a quarter as many days for the same
-    # accuracy. Someone who would rather have the earlier, noisier warning
-    # should set this to 70 and expect four times the alerts, not better ones.
+    # 70. On the current walk-forward the top band reads higher - 2.19x at 85+
+    # against 1.65x at 70-84 - but on seventeen spells its interval is 7.5-50.7%
+    # against 14.2-29.8%, which contains the band below it whole and reaches
+    # under the 13.29% base. Earlier runs had the two the other way round. The
+    # separation is not established, so the choice is only how often you want to
+    # be told: 85 fires on a fifth as many days. Someone who would rather have
+    # the earlier, noisier warning should set this to 70 and expect five times
+    # the alerts, not better ones.
     # Do not re-tune it each time the table wiggles; that is fitting to noise.
     # Persistence: two of the last three days, so one poke through is not an
     # instruction to sell anything.
@@ -329,18 +331,73 @@ def score(ranked: pd.DataFrame, chosen: list[str]) -> pd.DataFrame:
     return out
 
 
+def spells(mask: pd.Series) -> int:
+    """Separate runs of consecutive days inside a mask.
+
+    The forward window is twenty sessions, so two adjacent days share
+    nineteen twentieths of the path they are judged on. Counting them as two
+    observations is what makes a thin band look measured: 112 days above 85
+    are not 112 draws, they are a handful of episodes. This is the same count
+    `since2000.main` prints for its analog set, applied to the bands.
+    """
+    return int((mask & ~mask.shift(fill_value=False)).sum())
+
+
+def interval(p_hat: float, n: int) -> float:
+    """Half-width of the 95% interval on a rate, in percentage points.
+
+    Plain normal approximation - the point is the order of magnitude of the
+    uncertainty, not a third decimal on it.
+    """
+    if not n or pd.isna(p_hat):
+        return float("nan")
+    return 1.96 * ((p_hat * (1 - p_hat) / n) ** 0.5) * 100
+
+
 def event_rate(spx: pd.Series, mss: pd.Series) -> pd.DataFrame:
-    """How often the event followed, by band, on whatever series is handed in."""
+    """How often the event followed, by band, on whatever series is handed in.
+
+    Every rate carries two intervals on purpose. `ci_days` treats each day as
+    an observation, which is the number that makes the table look precise and
+    is wrong. `ci_spells` treats each unbroken run as one, which is closer to
+    the truth and much wider. Reading them side by side is the same move the
+    dashboard already makes with walk-forward against fitted: the gap between
+    the two is the finding, not either number alone.
+    """
     hit = fwd_drawdown(spx.reindex(mss.index)) <= EVENT_DEPTH
-    rows = [{"band": "all days", "days": int(len(mss)), "rate": hit.mean() * 100, "lift": 1.0}]
+    # The last EVENT_DAYS rows go, as rank_against_drawdown drops them at a
+    # January cut and since2000 drops them before its own rates. Their forward
+    # window runs off the end of the series: the final row is judged on one
+    # session, the row before it on two, and only rows EVENT_DAYS back get the
+    # full twenty.
+    #
+    # The direction that bias runs is NOT fixed, which is why the rule is to
+    # drop them rather than to correct them. A truncated window usually misses
+    # a fall that had not arrived yet, and suppresses the rate; but measured on
+    # a market already sliding when the data ends, those same rows catch the
+    # fall immediately and read HIGHER than the rest - 75% against 67.5% on a
+    # synthetic slide into the edge. Either way they answer a different
+    # question from every other row in the table, over a shorter horizon, and
+    # averaging the two questions together is the defect.
+    mss, hit = mss.iloc[:-EVENT_DAYS], hit.iloc[:-EVENT_DAYS]
     base = hit.mean()
+    everything = pd.Series(True, index=mss.index)
+    rows = [{"band": "all days", "days": int(len(mss)), "spells": spells(everything),
+             "rate": base * 100, "lift": 1.0,
+             "ci_days": interval(base, len(mss)),
+             "ci_spells": interval(base, spells(everything))}]
     for lo, hi in [(0, 45), (45, 70), (70, 85), (85, 101)]:
         m = (mss >= lo) & (mss < hi)
+        p_hat = hit[m].mean() if m.any() else float("nan")
+        runs = spells(m)
         rows.append({
             "band": f"{lo}-{hi - 1}" if hi < 101 else "85+",
             "days": int(m.sum()),
-            "rate": hit[m].mean() * 100,
-            "lift": (hit[m].mean() / base) if base and m.any() else float("nan"),
+            "spells": runs,
+            "rate": p_hat * 100,
+            "lift": (p_hat / base) if base and m.any() else float("nan"),
+            "ci_days": interval(p_hat, int(m.sum())),
+            "ci_spells": interval(p_hat, runs),
         })
     return pd.DataFrame(rows).set_index("band")
 
@@ -431,6 +488,18 @@ def selftest() -> None:
     assert d.iloc[-2] > d.iloc[-EVENT_DAYS], "the truncated tail understates the fall"
     r = pd.DataFrame({"x": range(n)}, index=idx, dtype=float)
     assert len(r.iloc[:-EVENT_DAYS]) == n - EVENT_DAYS, "the tail must be cut"
+
+    # event_rate must not score that tail either. Every row here sits in one
+    # band, so the day count is the whole assertion: what it counts is what it
+    # scored.
+    n = 300
+    idx = pd.bdate_range("2020-01-01", periods=n)
+    flat = pd.Series(100.0, index=idx)
+    band = pd.Series(90.0, index=idx)
+    ev = event_rate(flat, band)
+    assert int(ev.loc["all days", "days"]) == n - EVENT_DAYS, "the tail must not be scored"
+    assert int(ev.loc["85+", "days"]) == n - EVENT_DAYS, "and not inside a band either"
+    assert int(ev.loc["85+", "spells"]) == 1, "one unbroken run is one observation"
 
     # Persistence: one day through the line is not a flag, two of three is.
     mss = pd.Series([50, 75, 50, 75, 75], index=pd.bdate_range("2020-01-01", periods=5))
@@ -611,7 +680,7 @@ def build(a, live: bool = False) -> str | None:
                         float(ev.loc["all days", "rate"]),  # the everyday chance
                         curve["rate"].max(), curve["rate"].min(),
                         res.index[-1], px, res, chosen, br, a.days, live, held_back,
-                        history=export["score"], far=far)
+                        history=export["score"], far=far, ev=ev)
 
 
 def reanalyse(a, state, note) -> None:
