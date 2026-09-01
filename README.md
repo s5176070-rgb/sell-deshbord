@@ -93,7 +93,7 @@ del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Market Stress Serve
 | `alpha.py` | Gathers put/call history from Alpha Vantage, a few days per run |
 | `plan_checks.py` | Measures the claims in the original work plan instead of assuming them |
 | `cvs.py` | The first model. It failed. Kept as the record, and for its data helpers |
-| `patches.csv` | Closes a feed stopped publishing, with the source of each one |
+| `patches.csv` | Closes a feed stopped publishing, with the source of each one. The fallback under CBOE, not the first stop — see Known limits |
 | `serve.bat` | Starts the server at logon; the server does the daily run itself |
 
 ## The one rule
@@ -145,11 +145,22 @@ single one of the fifteen yearly selections:
   Cross-checked against TradingView's INDEX:S5FI on 2026-08-14: 69.77 vs 69.38.
 - **`^VIX3M` stopped updating on yfinance in July 2026**, along with `^VIX9D`
   and `^VIX6M`, while `^VIX` kept printing. The term-structure factor is chosen
-  every year, so `patches.csv` carries the missing closes, read off TradingView
-  and checked against the 25 days where the two sources overlap — they agree to
-  seven decimals. A patch only ever fills a NaN, so the file goes inert by
-  itself when the feed recovers. It has to be topped up by hand until then;
-  `^VVIX` is in the candidate pool and is current either way.
+  every year, so the hole had to be closed. It is closed from the exchange that
+  computes the index: `cvs.py` reads CBOE's own `VIX3M_History.csv` (keyless,
+  no account) and fills the gap before `patches.csv` gets its turn. That is a
+  primary source rather than a screenshot of one, and the two series agree to a
+  millionth over the 283 days they overlap. Only `^VIX3M` is fetched this way —
+  CBOE's `^VIX` file differs from yfinance's by up to 2.61, so it is not the
+  same series, and `^VVIX` has no `CLOSE` column at all. Verify before adding
+  one.
+
+  `patches.csv` is now the **fallback under that**, for the run where the CBOE
+  download fails: it holds hand-collected closes with the source of each row,
+  and only ever fills a NaN, so it goes inert by itself the moment either the
+  exchange file or the feed comes back. Top it up by hand only if a run reports
+  it actually filled days — the line `filled from CBOE and patches.csv: ...`
+  says which source closed what. `^VVIX` is in the candidate pool and is
+  current either way.
 - **Put/call is not in the score.** The endpoint serves one date per request, so
   the history has to be gathered a few days at a time. It stays out until 300
   rows exist to rank it against.
