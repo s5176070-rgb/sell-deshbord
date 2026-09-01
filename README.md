@@ -118,6 +118,15 @@ the whole track from 2012 on is out-of-sample. That is the number to quote:
 | 70–84 | 445 | 22.5% | 1.69× |
 | 85+ | 112 | 22.3% | 1.67× |
 
+**These figures predate two changes to `event_rate` and have not been recomputed.**
+It now drops the final twenty rows, whose forward window runs off the end of the
+series, and it reports `spells` and a 95% interval beside each rate. So the day
+counts above are each twenty too high in total, the rates will move by an amount
+that depends on what those twenty days did, and the table the code prints today
+is wider than this one. `python stress.py --bench` restates it and writes
+nothing; this section should be replaced from that output rather than edited by
+hand.
+
 Fitting the same model on all history instead reports 2.4× at the top. The gap
 between that and 1.67× is what selection invents, and it is why the dashboard
 shows both tables side by side.
@@ -129,7 +138,9 @@ top band is *positive*. A high reading argues for carrying less risk. It never
 argues for calling a top.
 
 The top two bands are currently indistinguishable — 1.69× against 1.67× on 445
-and 112 days. The sell flag sits at 85 because that fires on a quarter as many
+and 112 days, and the intervals say so arithmetically: ±3.9 and ±7.7 on those
+day counts, which puts 70–84 entirely inside 85+ before the spell count is even
+applied. The sell flag sits at 85 because that fires on a quarter as many
 days for the same accuracy, not because 85 is sharper than 70.
 
 ## Things that were tested and rejected
