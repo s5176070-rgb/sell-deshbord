@@ -1,11 +1,12 @@
 # Handover — branch `claude/project-artifact-destination-0qd00e`
 
-Written 1 September 2026, at `ba57ada`, for [PR #2](https://github.com/s5176070-rgb/sell-deshbord/pull/2).
+Written 1 September 2026 for [PR #2](https://github.com/s5176070-rgb/sell-deshbord/pull/2),
+covering `7c3e4dc..6773a71`.
 Delete this file when the PR merges; it describes one piece of work, not the project.
 
 ## What changed
 
-Five commits, oldest first.
+Seven commits, oldest first.
 
 | | |
 |---|---|
@@ -14,6 +15,8 @@ Five commits, oldest first.
 | `5af858a` | The selftests in CI — the repo had no workflows at all |
 | `d82b9e2` | `event_rate` stops scoring the twenty rows whose forward window is cut short |
 | `ba57ada` | The headline README table flagged as predating both `event_rate` changes |
+| `6afd90c` | This file |
+| `6773a71` | The table restated from a run that had market data — see below |
 
 ## What turned up along the way
 
@@ -67,24 +70,41 @@ losing the colour, not by erroring.
 daily file first. That stale paragraph is what sent this session hand-collecting
 ten sessions of `^VIX3M` that the code may well have fetched on its own.
 
-## Where this stopped
+## Where this stopped, and how it was unblocked
 
-**The model has not been scored.** `python stress.py --bench` does not run in the
-environment this branch was written in: every one of the twenty tickers returns
-`CONNECT tunnel failed, response 403` from the egress proxy, and `stress.build`
-correctly refuses with `no price data came back`. The block is an organization
-network policy on that environment, recorded by the proxy as `connect_rejected`
-against `query1/query2.finance.yahoo.com` and `guce.yahoo.com`. It is not a code
-problem and there is no route around it from there.
+**The model could not be scored where the branch was written.** `python stress.py
+--bench` returned `CONNECT tunnel failed, response 403` from the egress proxy for
+all twenty tickers, and `stress.build` correctly refused with `no price data came
+back` — an organization network policy, not a code problem, with no route around
+it from there. Everything that does not need market data was run and passed: five
+selftests on 3.11 and 3.12, `compileall` clean, and the new code exercised against
+synthetic series built so the counts were known in advance.
 
-Everything that does not need market data was run and passes: all five selftests
-on 3.11 and 3.12, `compileall` clean, and the new code exercised against
-synthetic series built so the counts are known in advance.
+**`6773a71` cleared it**, run on a machine with market access, and the table was
+copied from that run rather than edited by hand. Its arithmetic was checked
+afterwards against its own rate and count columns: every `±days` and `±spells`
+figure reproduces to within 0.02 points, so the table is internally consistent
+and safe to quote.
 
-**So the headline table in the README is stale, and is marked as such.** Both
-`event_rate` changes move it — day counts are each twenty too high in total, the
-rates shift by whatever those twenty days did, and the printed table is now wider
-than the one in the document.
+| Score | Days | Spells | 5% fall in 20 sessions | vs base | ±days | ±spells |
+|---|---|---|---|---|---|---|
+| all days | 3,657 | — | 13.29% | 1.00× | 1.10 | 66.53 |
+| 0–44 | 1,574 | 203 | 8.26% | 0.62× | 1.36 | 3.79 |
+| 45–69 | 1,585 | 294 | 15.21% | 1.14× | 1.77 | 4.10 |
+| 70–84 | 419 | 108 | 21.96% | 1.65× | 3.96 | 7.81 |
+| 85+ | 79 | 17 | 29.11% | 2.19× | 10.02 | 21.60 |
+
+**The answer is worse for the model than the old figures suggested, and it is the
+spell count that says so.** On days alone the top band looks sharper than ever —
+29.11%, a 2.19× lift, up from 1.67×. On its seventeen spells the interval is
+7.5–50.7%. That contains 70–84's 14.2–29.8% whole *and* reaches under the 13.29%
+base, so the sample does not establish that 85+ beats an average day, let alone
+the band beneath it. A lift that travels 1.67× → 2.19× on one recount is the same
+finding from the other side: it was never resting on a sample.
+
+Day counts went **up**, 3,646 → 3,657, not down by twenty. Roughly thirty-one
+sessions were added between the two measurements, which more than covers the
+twenty rows `event_rate` now drops.
 
 ## Next
 
@@ -110,6 +130,13 @@ Two things deliberately left alone, in case they look like oversights:
   Traced to the degenerate path where no column returned any data at all — which
   is exactly what a fully blocked download produces. It should not fire on a real
   run. Untouched because it is outside this branch and unverifiable without data.
+- **`±spells` is meaningless on the `all days` row, and the table shows why.**
+  Every day is in that row, so it is one unbroken spell, and an interval on a
+  sample of one comes out ±66.53. The pushed table renders its `Spells` cell as
+  `—`, which is right, but keeps the interval beside it. `event_rate` still
+  returns both. Either suppress the pair for that row or leave it — it is
+  obvious enough on the page not to mislead, and it is not worth a commit on
+  its own.
 - **Nothing was added to the score.** Every change here measures the existing
   score more honestly or documents it. `MIN_CORR`, the band edges, the factor
   list and `FLAG` are all untouched, so the reading itself does not move — only
