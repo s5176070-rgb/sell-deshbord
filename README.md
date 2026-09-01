@@ -33,6 +33,11 @@ cached file in place and the rescore still happens, and the page says so.
 `python stress.py --bench` prints the tables and writes nothing. `--full` writes
 the evidence page instead of the plain one. Every script has a `--selftest`.
 
+Those selftests are what CI runs, on 3.11 and 3.12. They build their frames in
+memory - no network, no key, no fixtures - so they check the logic under the
+numbers and never the numbers themselves. Scoring the model needs Yahoo and a
+warm `breadth.csv`, so that stays a local run.
+
 Every run also writes **`score.csv`** — one row per day since 2008:
 
 | column | what it is |
@@ -95,6 +100,7 @@ del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Market Stress Serve
 | `cvs.py` | The first model. It failed. Kept as the record, and for its data helpers |
 | `patches.csv` | Closes a feed stopped publishing, with the source of each one. The fallback under CBOE, not the first stop — see Known limits |
 | `serve.bat` | Starts the server at logon; the server does the daily run itself |
+| `.github/workflows/selftests.yml` | Runs every `--selftest` on push and on a pull request |
 
 ## The one rule
 
