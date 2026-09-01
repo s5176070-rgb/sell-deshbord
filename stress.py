@@ -329,18 +329,58 @@ def score(ranked: pd.DataFrame, chosen: list[str]) -> pd.DataFrame:
     return out
 
 
+def spells(mask: pd.Series) -> int:
+    """Separate runs of consecutive days inside a mask.
+
+    The forward window is twenty sessions, so two adjacent days share
+    nineteen twentieths of the path they are judged on. Counting them as two
+    observations is what makes a thin band look measured: 112 days above 85
+    are not 112 draws, they are a handful of episodes. This is the same count
+    `since2000.main` prints for its analog set, applied to the bands.
+    """
+    return int((mask & ~mask.shift(fill_value=False)).sum())
+
+
+def interval(p_hat: float, n: int) -> float:
+    """Half-width of the 95% interval on a rate, in percentage points.
+
+    Plain normal approximation - the point is the order of magnitude of the
+    uncertainty, not a third decimal on it.
+    """
+    if not n or pd.isna(p_hat):
+        return float("nan")
+    return 1.96 * ((p_hat * (1 - p_hat) / n) ** 0.5) * 100
+
+
 def event_rate(spx: pd.Series, mss: pd.Series) -> pd.DataFrame:
-    """How often the event followed, by band, on whatever series is handed in."""
+    """How often the event followed, by band, on whatever series is handed in.
+
+    Every rate carries two intervals on purpose. `ci_days` treats each day as
+    an observation, which is the number that makes the table look precise and
+    is wrong. `ci_spells` treats each unbroken run as one, which is closer to
+    the truth and much wider. Reading them side by side is the same move the
+    dashboard already makes with walk-forward against fitted: the gap between
+    the two is the finding, not either number alone.
+    """
     hit = fwd_drawdown(spx.reindex(mss.index)) <= EVENT_DEPTH
-    rows = [{"band": "all days", "days": int(len(mss)), "rate": hit.mean() * 100, "lift": 1.0}]
     base = hit.mean()
+    everything = pd.Series(True, index=mss.index)
+    rows = [{"band": "all days", "days": int(len(mss)), "spells": spells(everything),
+             "rate": base * 100, "lift": 1.0,
+             "ci_days": interval(base, len(mss)),
+             "ci_spells": interval(base, spells(everything))}]
     for lo, hi in [(0, 45), (45, 70), (70, 85), (85, 101)]:
         m = (mss >= lo) & (mss < hi)
+        p_hat = hit[m].mean() if m.any() else float("nan")
+        runs = spells(m)
         rows.append({
             "band": f"{lo}-{hi - 1}" if hi < 101 else "85+",
             "days": int(m.sum()),
-            "rate": hit[m].mean() * 100,
-            "lift": (hit[m].mean() / base) if base and m.any() else float("nan"),
+            "spells": runs,
+            "rate": p_hat * 100,
+            "lift": (p_hat / base) if base and m.any() else float("nan"),
+            "ci_days": interval(p_hat, int(m.sum())),
+            "ci_spells": interval(p_hat, runs),
         })
     return pd.DataFrame(rows).set_index("band")
 
@@ -611,7 +651,7 @@ def build(a, live: bool = False) -> str | None:
                         float(ev.loc["all days", "rate"]),  # the everyday chance
                         curve["rate"].max(), curve["rate"].min(),
                         res.index[-1], px, res, chosen, br, a.days, live, held_back,
-                        history=export["score"], far=far)
+                        history=export["score"], far=far, ev=ev)
 
 
 def reanalyse(a, state, note) -> None:

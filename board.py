@@ -356,7 +356,7 @@ BROADSHEET_CSS = """
   --font-heading:"Source Serif 4",system-ui,sans-serif; --font-body:"Source Serif 4",system-ui,sans-serif;
   --space-1:5px; --space-2:10px; --space-3:15px; --space-4:20px; --space-6:30px; --space-8:40px;
   --radius-sm:1px; --radius-md:2px;
-  --good:#1a7f4b; --warn:#b5820a; --crit:#b3261e;
+  --good:#1a7f4b; --warn:#b5820a; --serious:#b5560a; --crit:#b3261e;
   /* Aliases so plot()/panel() - built for the dark dashboard - render correctly
      here too, unchanged: they paint with these var names directly. */
   --line:var(--color-divider); --base:var(--color-divider);
@@ -455,10 +455,20 @@ def simple(score: float, chance_now: float, base: float, ceiling: float, floor: 
            asof, px: pd.DataFrame, res: pd.DataFrame, chosen: list[str],
            br: pd.DataFrame, days: int = 63,
            live: bool = False, held_back: str | None = None,
-           history: pd.Series | None = None, far: dict | None = None) -> str:
-    """One screen: today's score and its factors, charts only - no tables.
+           history: pd.Series | None = None, far: dict | None = None,
+           ev: pd.DataFrame | None = None) -> str:
+    """One screen: today's score, its factors, and the track record behind them.
     Broadsheet design system (light, RTL, serif) - the handoff in
     design_handoff_market_stress_dashboard/, recreated with real values.
+
+    `ev` is the walk-forward table `render` already gets. It is optional so an
+    older caller still builds a page, and when it is passed this page stops
+    being the only one of the two that shows a number without its evidence.
+
+    The band a reading belongs to is `band_of(MSS)`, NOT `band_of(score)`.
+    The two are different scales - the score is the calibrated chance stretched
+    over 0-100, the bands are cut on the raw percentile - and reading the band
+    off the published score puts today in the wrong row.
     """
     last = res.iloc[-1]
     regime = str(last["regime"])
@@ -486,6 +496,46 @@ def simple(score: float, chance_now: float, base: float, ceiling: float, floor: 
         for k, v in top_readings)
 
     mss5, mss10 = float(last["MSS_5d"]), float(last["MSS_10d"])
+
+    # The track record, on the same page as the reading it justifies. Cut on the
+    # raw percentile, which is what the bands are defined over.
+    walkforward = ""
+    if ev is not None and "all days" in ev.index:
+        here = band_of(float(last["MSS"]))
+        wf = ev.drop(index="all days")
+        # The interval is the spell-based one, not the day-based one: adjacent
+        # days share their forward window, so days overstate the sample.
+        has_ci = "ci_spells" in ev.columns and "spells" in ev.columns
+        cards = "".join(
+            f'<div class="card">'
+            f'<div class="card-kicker">ציון <span dir="ltr">{b}</span>'
+            f'{" &middot; היום" if b == here else ""}</div>'
+            f'<div class="card-title" style="color:{band_colour(b)}" dir="ltr">'
+            f'{r.rate:.1f}%'
+            + (f'<small style="font-size:14px;color:var(--mut)"> &plusmn;{r.ci_spells:.1f}</small>'
+               if has_ci and pd.notna(r.ci_spells) else "")
+            + f'</div>'
+            f'<div class="note" style="font-size:12px;margin-top:4px">'
+            f'<span dir="ltr">{r.lift:.2f}&times;</span> מהבסיס &middot; '
+            f'<span dir="ltr">{r.days:,.0f}</span> ימים'
+            + (f' ב-<span dir="ltr">{r.spells:,.0f}</span> התקפים' if has_ci else "")
+            + '</div></div>'
+            for b, r in wf.iterrows())
+        walkforward = f"""
+  <h2>המסלול מחוץ למדגם</h2>
+  <p class="text-muted" style="margin:0 0 var(--space-3);font-size:14px;max-width:70ch">
+    כל גורם נבחר מחדש בכל ינואר מתוך השנים שהסתיימו לפניו בלבד, ונמדד על השנה שאחריו.
+    <span dir="ltr">{int(ev.loc["all days", "days"]):,}</span> ימי מסחר, כולם מחוץ למדגם:
+    מתוך הימים בכל פס, כמה מהם ירדו 5% תוך עשרים מפגשים. הבסיס ליום אקראי הוא
+    <span dir="ltr">{base:.1f}%</span>.</p>
+  <div style="display:grid;grid-template-columns:repeat({len(wf)},1fr);
+              gap:var(--space-3);margin-bottom:var(--space-3)">{cards}</div>
+  <p class="note" style="font-size:12px;margin:0 0 var(--space-8);max-width:70ch">
+    הפס נקבע לפי הציון הגולמי, לא לפי הציון המכויל שבראש הדף &mdash; שני סולמות
+    שונים. הטווח הוא רווח סמך 95% שנספר לפי התקפים ולא לפי ימים: חלון החיזוי הוא
+    עשרים יום, כך שימים סמוכים אינם תצפיות נפרדות. שני הפסים העליונים אינם
+    נבדלים זה מזה במדגם הזה.</p>"""
+
     since2000 = ""
     if far:
         word = ("רגוע יותר" if far["lift"] < 0.9 else
@@ -548,6 +598,8 @@ def simple(score: float, chance_now: float, base: float, ceiling: float, floor: 
         מהאמצע, מתוך {len(chosen)} בשימוש היום.</p>
     </div>
   </div>
+
+  {walkforward}
 
   <h2>אינדיקטורים נוספים</h2>
   <div style="margin-bottom:var(--space-8)">{panels(px, br, days=days)}</div>
@@ -615,13 +667,16 @@ def panels(px: pd.DataFrame, br: pd.DataFrame, days: int = 500) -> str:
     ]) + "</div>"
 
 
-def tile(band: str, days: int, rate: float, lift: float, current: bool) -> str:
+def tile(band: str, days: int, rate: float, lift: float, current: bool,
+         ci: float = float("nan"), spells: int = 0) -> str:
     colour = f"var(--{ {'calm': 'good', 'watch': 'warn', 'elevated': 'serious', 'critical': 'crit'}[BAND_STATUS[band]] })"
     now = '<span class="tag" style="color:var(--ink2);font-size:10.5px">today</span>' if current else ""
+    band_ci = f'<small> &plusmn;{ci:.1f}</small>' if ci == ci else ""
+    runs = f" in {spells:,} spells" if spells else ""
     return f"""<div class="card">
   <div class="lbl"><span class="dot" style="background:{colour}"></span>Score {band} {now}</div>
-  <div class="val" style="color:{colour}">{rate:.1f}<small>%</small></div>
-  <div class="sub">{lift:.2f}&times; the base rate &middot; {days:,} days</div>
+  <div class="val" style="color:{colour}">{rate:.1f}<small>%</small>{band_ci}</div>
+  <div class="sub">{lift:.2f}&times; the base rate &middot; {days:,} days{runs}</div>
 </div>"""
 
 
@@ -637,7 +692,8 @@ def render(res: pd.DataFrame, chosen: list[str], ev: pd.DataFrame, ev_all: pd.Da
     base = float(ev.loc["all days", "rate"])
 
     tiles = "".join(
-        tile(b, int(r.days), float(r.rate), float(r.lift), b == here)
+        tile(b, int(r.days), float(r.rate), float(r.lift), b == here,
+             float(getattr(r, "ci_spells", float("nan"))), int(getattr(r, "spells", 0)))
         for b, r in ev.drop(index="all days").iterrows())
 
     bars = "".join(
