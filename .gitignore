@@ -5,7 +5,7 @@
 # Generated. Every one of these is rebuilt by running the scripts.
 dashboard*.html
 score.csv
-daily.log
+*.log
 .last_analysis
 __pycache__/
 *.pyc
@@ -16,3 +16,6 @@ breadth.csv
 alpha_putcall.csv
 alpha_context.json
 valuation.csv
+
+# Windows writes this into any folder you give a custom icon or view to.
+desktop.ini
