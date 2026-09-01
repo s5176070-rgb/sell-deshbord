@@ -171,7 +171,12 @@ single one of the fifteen yearly selections:
   the history has to be gathered a few days at a time. It stays out until 300
   rows exist to rank it against.
 - **112 days above 85 in fourteen years.** The edge is real and the sample
-  behind it is thin.
+  behind it is thin. Thinner than the day count suggests, in fact: the forward
+  window is twenty sessions, so consecutive days share nineteen twentieths of
+  the path they are judged on. The table reports `spells` beside `days` for
+  that reason, and a 95% interval computed on each - `ci_days` is the
+  flattering one and `ci_spells` the defensible one. Quote the pair, the way
+  walk-forward is quoted against fitted.
 - **Intraday runs read yesterday.** `^VIX` posts a bar before the ETFs open, so
   a run during market hours sees a last row where most factors are still empty.
   Rather than average the third that reported, the run backs off to the last day

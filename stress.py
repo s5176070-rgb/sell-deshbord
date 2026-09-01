@@ -363,6 +363,21 @@ def event_rate(spx: pd.Series, mss: pd.Series) -> pd.DataFrame:
     the two is the finding, not either number alone.
     """
     hit = fwd_drawdown(spx.reindex(mss.index)) <= EVENT_DEPTH
+    # The last EVENT_DAYS rows go, as rank_against_drawdown drops them at a
+    # January cut and since2000 drops them before its own rates. Their forward
+    # window runs off the end of the series: the final row is judged on one
+    # session, the row before it on two, and only rows EVENT_DAYS back get the
+    # full twenty.
+    #
+    # The direction that bias runs is NOT fixed, which is why the rule is to
+    # drop them rather than to correct them. A truncated window usually misses
+    # a fall that had not arrived yet, and suppresses the rate; but measured on
+    # a market already sliding when the data ends, those same rows catch the
+    # fall immediately and read HIGHER than the rest - 75% against 67.5% on a
+    # synthetic slide into the edge. Either way they answer a different
+    # question from every other row in the table, over a shorter horizon, and
+    # averaging the two questions together is the defect.
+    mss, hit = mss.iloc[:-EVENT_DAYS], hit.iloc[:-EVENT_DAYS]
     base = hit.mean()
     everything = pd.Series(True, index=mss.index)
     rows = [{"band": "all days", "days": int(len(mss)), "spells": spells(everything),
@@ -471,6 +486,18 @@ def selftest() -> None:
     assert d.iloc[-2] > d.iloc[-EVENT_DAYS], "the truncated tail understates the fall"
     r = pd.DataFrame({"x": range(n)}, index=idx, dtype=float)
     assert len(r.iloc[:-EVENT_DAYS]) == n - EVENT_DAYS, "the tail must be cut"
+
+    # event_rate must not score that tail either. Every row here sits in one
+    # band, so the day count is the whole assertion: what it counts is what it
+    # scored.
+    n = 300
+    idx = pd.bdate_range("2020-01-01", periods=n)
+    flat = pd.Series(100.0, index=idx)
+    band = pd.Series(90.0, index=idx)
+    ev = event_rate(flat, band)
+    assert int(ev.loc["all days", "days"]) == n - EVENT_DAYS, "the tail must not be scored"
+    assert int(ev.loc["85+", "days"]) == n - EVENT_DAYS, "and not inside a band either"
+    assert int(ev.loc["85+", "spells"]) == 1, "one unbroken run is one observation"
 
     # Persistence: one day through the line is not a flag, two of three is.
     mss = pd.Series([50, 75, 50, 75, 75], index=pd.bdate_range("2020-01-01", periods=5))
