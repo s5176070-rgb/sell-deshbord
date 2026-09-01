@@ -88,14 +88,21 @@ than the one in the document.
 
 ## Next
 
-1. **Run `python stress.py --bench`** on a machine with market access. It prints
-   the tables and writes nothing. This is the first real check of the numbers,
-   and it is what settles whether the top band's edge survives its own interval —
-   watch the `spells` column above 85, because that is the sample the 1.67×
-   actually rests on.
-2. **Replace the README table from that output.** A copy, not an edit by hand.
-   The section under "The one rule" says so.
-3. **Merge the PR** once the table is restated.
+1. ~~Run `python stress.py --bench`~~ — **done**, on a machine with market
+   access. The answer to the question this branch could not settle: the top
+   band's edge does *not* survive its own interval. 85+ is 29.11% on 79 days
+   and seventeen spells, and ±21.60 on the spell count puts it at 7.5–50.7%.
+   That contains 70–84's 14.2–29.8% whole, and its lower end sits under the
+   13.29% base — so seventeen spells do not establish that the top band beats
+   average, never mind the band below it. The lift itself moved from 1.67× to
+   2.19×, which is the same point from the other side: a number that jumps that
+   far on a recount was never resting on a sample.
+2. ~~Replace the README table from that output.~~ **done** — copied, and the two
+   paragraphs that quoted the old figures (`2.4×` at the top, and the
+   "indistinguishable" note under "What the score does not say") restated from
+   the same run. `stress.py:318`'s comment on why `FLAG` is 85 carried the same
+   stale pair and was restated too.
+3. **Merge the PR.** Nothing outstanding — selftests and `compileall` pass.
 
 Two things deliberately left alone, in case they look like oversights:
 

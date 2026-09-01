@@ -316,12 +316,14 @@ def score(ranked: pd.DataFrame, chosen: list[str]) -> pd.DataFrame:
     out["dispersion"] = ranked[chosen].std(axis=1)
     out["regime"] = regimes(out["MSS"])
     # The flag sits at 85, and the honest reason is not that 85 is better than
-    # 70. On the current walk-forward the top two bands are indistinguishable -
-    # 1.69x at 70-84 against 1.67x at 85+, on 445 and 112 days - and earlier
-    # runs had them the other way round. At equal lift the choice is only how
-    # often you want to be told: 85 fires on a quarter as many days for the same
-    # accuracy. Someone who would rather have the earlier, noisier warning
-    # should set this to 70 and expect four times the alerts, not better ones.
+    # 70. On the current walk-forward the top band reads higher - 2.19x at 85+
+    # against 1.65x at 70-84 - but on seventeen spells its interval is 7.5-50.7%
+    # against 14.2-29.8%, which contains the band below it whole and reaches
+    # under the 13.29% base. Earlier runs had the two the other way round. The
+    # separation is not established, so the choice is only how often you want to
+    # be told: 85 fires on a fifth as many days. Someone who would rather have
+    # the earlier, noisier warning should set this to 70 and expect five times
+    # the alerts, not better ones.
     # Do not re-tune it each time the table wiggles; that is fitting to noise.
     # Persistence: two of the last three days, so one poke through is not an
     # instruction to sell anything.

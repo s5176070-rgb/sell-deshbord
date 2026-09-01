@@ -110,26 +110,23 @@ Every candidate is re-picked each January using only the years that ended before
 it, and scored on the twelve months that follow. Stitch those years together and
 the whole track from 2012 on is out-of-sample. That is the number to quote:
 
-| Score | Days | 5% fall within 20 sessions | vs base |
-|---|---|---|---|
-| all days | 3,646 | 13.3% | — |
-| 0–44 | 1,574 | 8.1% | 0.61× |
-| 45–69 | 1,515 | 15.4% | 1.15× |
-| 70–84 | 445 | 22.5% | 1.69× |
-| 85+ | 112 | 22.3% | 1.67× |
+| Score | Days | Spells | 5% fall within 20 sessions | vs base | ±days | ±spells |
+|---|---|---|---|---|---|---|
+| all days | 3,657 | — | 13.29% | 1.00× | 1.10 | 66.53 |
+| 0–44 | 1,574 | 203 | 8.26% | 0.62× | 1.36 | 3.79 |
+| 45–69 | 1,585 | 294 | 15.21% | 1.14× | 1.77 | 4.10 |
+| 70–84 | 419 | 108 | 21.96% | 1.65× | 3.96 | 7.81 |
+| 85+ | 79 | 17 | 29.11% | 2.19× | 10.02 | 21.60 |
 
-**These figures predate two changes to `event_rate` and have not been recomputed.**
-It now drops the final twenty rows, whose forward window runs off the end of the
-series, and it reports `spells` and a 95% interval beside each rate. So the day
-counts above are each twenty too high in total, the rates will move by an amount
-that depends on what those twenty days did, and the table the code prints today
-is wider than this one. `python stress.py --bench` restates it and writes
-nothing; this section should be replaced from that output rather than edited by
-hand.
+Copied from `python stress.py --bench`, which restates this and writes nothing.
+Replace the section from that output rather than editing it by hand. The spell
+count on `all days` is degenerate — the whole span is one unbroken run — so the
+code prints 1 there and its ±spells of 66.53 means nothing; the row is kept for
+its rate, which is the base every lift divides by.
 
-Fitting the same model on all history instead reports 2.4× at the top. The gap
-between that and 1.67× is what selection invents, and it is why the dashboard
-shows both tables side by side.
+Fitting the same model on all history instead reports 2.31× at the top, on 207
+days and 44 spells. The gap between that and 2.19× is what selection invents,
+and it is why the dashboard shows both tables side by side.
 
 ## What the score does not say
 
@@ -137,11 +134,14 @@ It predicts **drawdown depth, not direction**. Forward 20-day return from the
 top band is *positive*. A high reading argues for carrying less risk. It never
 argues for calling a top.
 
-The top two bands are currently indistinguishable — 1.69× against 1.67× on 445
-and 112 days, and the intervals say so arithmetically: ±3.9 and ±7.7 on those
-day counts, which puts 70–84 entirely inside 85+ before the spell count is even
-applied. The sell flag sits at 85 because that fires on a quarter as many
-days for the same accuracy, not because 85 is sharper than 70.
+The top band now reads higher than the one below it — 2.19× against 1.65× — but
+the separation does not survive its own interval. On day counts 70–84 is
+18.0–25.9% and 85+ is 19.1–39.1%; on spells, which is the honest count, they are
+14.2–29.8% and 7.5–50.7%. The second contains the first whole. Worse, 7.5% is
+below the 13.29% base, so seventeen spells are not enough to establish that the
+top band is even above average, let alone above the band beneath it. The sell
+flag sits at 85 because it fires on a fifth as many days for an accuracy that
+cannot be shown to differ, not because 85 is sharper than 70.
 
 ## Things that were tested and rejected
 
