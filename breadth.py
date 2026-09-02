@@ -12,6 +12,16 @@ Two things this is not:
     backwards, so the 2008 reading is "how did the companies that survived to
     2026 look in 2008" - which flatters the past. Every history built this way
     has the bias; naming it is the difference between a limitation and a lie.
+
+    How much it flatters was measured rather than assumed. Restricting the
+    count to the 333 names already trading in 1999 and comparing against the
+    full list moves the reading by +0.03pp on average, and by -0.10pp on the
+    days under 20% above the 50-day - the two series correlate 0.9951. The
+    reason is that this is a share of names above *their own* average, which is
+    scale-free: a company that later halved still crossed its own mean about as
+    often on the way. That test cannot see the companies that are gone
+    entirely, so it bounds the composition effect, not the whole bias, and the
+    dot-com bust is where the missing names would have hurt most.
   * It is not identical to S5FI. That index uses the membership of the day.
     Recent values should still line up closely, and `--check` prints today's
     number so it can be held against the live one.
@@ -32,7 +42,11 @@ import yfinance as yf
 
 CSV = Path(__file__).with_name("breadth.csv")
 WIKI = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-START = "2005-01-01"
+# 1996, not 2005: 337 of today's members were already trading in 1999, above
+# the MIN_NAMES floor, so the breadth factors can be candidates from 1999 like
+# everything else on the bench instead of waiting until 2008. The two hundred
+# sessions before that are the 200-day warm-up.
+START = "1996-01-01"
 WINDOWS = {"s5fi": 50, "s5th": 200}
 # CNN Fear & Greed's "stock price strength" leg: not distance from an average
 # (that's s5th) but how many names are printing fresh 52-week highs against
