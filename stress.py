@@ -37,6 +37,7 @@ import pandas as pd
 import alpha
 import board
 import breadth
+import pcr
 import valuation
 from cvs import closes, forward, patch, pct_rank, regimes, stale
 
@@ -50,7 +51,7 @@ TICKERS = ["^GSPC", "^VIX", "^VIX3M", "^VVIX", "RSP", "SPY", "XLY", "XLP", "XLU"
            # for everyone. A candidate has to be a clean feed, not just a good
            # signal.
            "^RUT", "^SOX", "^DJT", "^DJI", "GLD", "UUP"]
-START = "2006-01-01"
+START = "1990-01-01"  # ^VIX begins 1990; the ETFs join as they list
 
 # What counts as the event worth selling ahead of.
 EVENT_DAYS, EVENT_DEPTH = 20, -0.05
@@ -58,8 +59,13 @@ EVENT_DAYS, EVENT_DEPTH = 20, -0.05
 # years available at the time to be let into the composite. One bar, all years.
 MIN_CORR = -0.06
 FLAG = 85  # the level the sell flag acts on; see score() for why it is not 70
-FIRST_LIVE_YEAR = 2012  # the first January with enough history behind it to pick on
+FIRST_LIVE_YEAR = 1991  # walk_forward skips Januaries until MIN_TRAIN rows exist
 MIN_TRAIN = 756  # three years of ranked rows before a selection is allowed
+# The score is an average over a bench, and a year picked on one or two
+# factors is a different instrument wearing the same name: 1995 read 85+ for
+# 164 days on a single indicator in a year that never dipped. Half the original
+# sixteen-candidate bench is the floor; years below it train but do not count.
+MIN_CHOSEN = 8
 # Share of the chosen factors that must report before a day may be the reading.
 # One index posting an early bar while the ETFs have not opened drags the frame's
 # last date forward, and the score then averages whatever handful of factors
@@ -76,7 +82,7 @@ STAMP = Path(__file__).with_name(".last_analysis")
 
 
 def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
-               pc: pd.DataFrame | None = None, val: pd.DataFrame | None = None) -> pd.DataFrame:
+               pc: pd.Series | None = None, val: pd.DataFrame | None = None) -> pd.DataFrame:
     """Every raw reading worth testing. Higher must mean *more* stress, always.
 
     Signs are set here and nowhere else, so the bench measures direction as
@@ -199,6 +205,20 @@ def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
     c["gold_bid"] = (px["GLD"] / spx).pct_change(20)
     c["dollar_bid"] = px["UUP"].pct_change(20)
 
+    # Calendar seasonality. September reads worst in the raw count - 23.3%
+    # against a 15.2% base since 1990 - but on 26 spells its interval is
+    # 7-39%, which contains the base whole. So it goes on the bench like
+    # everything else rather than into the score on its reputation.
+    #
+    # Built with no forward look: the reading is the *trailing* twenty-day
+    # drawdown, which is finished and known today, averaged over every earlier
+    # occurrence of the same calendar month. shift(1) inside the group drops
+    # today's own value, so a September day is scored on Septembers that have
+    # already happened and never on its own.
+    trailing_dd = spx.rolling(20).min() / spx.shift(19) - 1
+    c["seasonal"] = -trailing_dd.groupby(trailing_dd.index.month).transform(
+        lambda m: m.shift(1).expanding().mean())
+
     if br is not None and not br.empty:
         # True breadth, counted off the constituents (see breadth.py). Two
         # readings of the same series in opposite directions, deliberately:
@@ -233,7 +253,7 @@ def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
         # Two directions again, because both stories are told about this series:
         # heavy put buying as fear that marks a bottom, and light put buying as
         # an unhedged market with further to fall.
-        chain = pc["full_chain"].reindex(px.index).ffill(limit=5)
+        chain = pc.reindex(px.index).ffill(limit=5)
         c["puts_heavy"] = chain
         c["puts_light"] = -chain
         c["puts_change_20"] = -chain.diff(20)
@@ -274,7 +294,11 @@ def rank_against_drawdown(ranked: pd.DataFrame, spx: pd.Series) -> pd.Series:
     lies on the other side of the boundary.
     """
     dd = fwd_drawdown(spx.reindex(ranked.index))
-    return ranked.iloc[:-EVENT_DAYS].corrwith(dd.iloc[:-EVENT_DAYS])
+    past = ranked.iloc[:-EVENT_DAYS]
+    corr = past.corrwith(dd.iloc[:-EVENT_DAYS])  # pairwise: a NaN row costs only its own column
+    # A column that has not yet been around for MIN_TRAIN rows is not on the
+    # bench this January - a hundred lucky days is not a record.
+    return corr.where(past.count() >= MIN_TRAIN)
 
 
 def select(corr: pd.Series) -> list[str]:
@@ -290,15 +314,20 @@ def walk_forward(ranked: pd.DataFrame, spx: pd.Series) -> tuple[pd.Series, dict[
     """Re-pick every January on prior years only; keep the score for that year.
 
     Returns the stitched out-of-sample score and what was chosen each year.
+
+    Rows need not be complete. Each January judges every candidate on the
+    history *it* has - rank_against_drawdown holds each to MIN_TRAIN on its own
+    - so the index-only factors are on the bench from the mid-nineties while the
+    ETF ones join as they list, and 2008 is no longer the first year that counts.
     """
     pieces: list[pd.Series] = []
     picks: dict[int, list[str]] = {}
     for year in range(FIRST_LIVE_YEAR, ranked.index[-1].year + 1):
         past = ranked[ranked.index < f"{year}-01-01"]
-        if len(past) < MIN_TRAIN:
+        if past.count().max() < MIN_TRAIN:
             continue
         chosen = select(rank_against_drawdown(past, spx))
-        if not chosen:
+        if len(chosen) < MIN_CHOSEN:
             continue
         window = ranked[(ranked.index >= f"{year}-01-01") & (ranked.index < f"{year + 1}-01-01")]
         picks[year] = chosen
@@ -453,6 +482,33 @@ def relative(chance_pct, curve: pd.DataFrame):
     return (chance_pct - lo) / ((hi - lo) or 1.0) * 100
 
 
+def chance_walk_forward(scores: pd.Series, oos: pd.Series, hit: pd.Series,
+                        warmup: int = 2) -> tuple[pd.Series, pd.DataFrame]:
+    """Read every day off a curve built only from out-of-sample years before it.
+
+    The factors are re-picked each January on prior years; the curve that turns
+    their average into "this many fell" must be held to the same rule, or the
+    chance shown for a day is partly counted from that day's own outcome. Each
+    year reads against the curve its January could have drawn. The first
+    `warmup` years have no prior out-of-sample days to draw one from and read
+    off the first curve that exists - the one honest exception, and a small one.
+    The tail of each training slice is cut as in rank_against_drawdown, for the
+    same reason. Returns the daily chance and the curve today reads against.
+    """
+    first = oos.index[0].year + warmup
+    curves = {}
+    for year in range(first, scores.index[-1].year + 1):
+        past = oos[oos.index < f"{year}-01-01"].iloc[:-EVENT_DAYS]
+        curves[year] = calibration(past, hit.reindex(past.index))
+    out = pd.Series(index=scores.index, dtype=float)
+    for year, curve in curves.items():
+        rows = scores.index.year == year
+        out[rows] = chance(scores[rows], curve)
+    warm = scores.index.year < first
+    out[warm] = chance(scores[warm], curves[first])
+    return out, curves[max(curves)]
+
+
 def stability(picks: dict[int, list[str]], names: list[str]) -> pd.DataFrame:
     """How many of the re-selections each candidate survived, and its last year."""
     years = sorted(picks)
@@ -516,6 +572,40 @@ def selftest() -> None:
     assert chance(scores.iloc[-1], curve) == curve["rate"].iloc[-1], "top reads the top"
     assert chance(-999, curve) == curve["rate"].iloc[0], "below the range is flat"
 
+    # A column that lists late must not cost the early years - it joins the
+    # bench once it has MIN_TRAIN rows of its own and is unseen before that.
+    n = 252 * 8
+    idx = pd.bdate_range("2000-01-01", periods=n)
+    spx_syn = pd.Series(100.0 + pd.Series(range(n)).mod(50).values, index=idx)
+    early = pd.Series(range(n), index=idx, dtype=float)
+    late = early.copy(); late[idx.year < 2004] = None
+    corr = rank_against_drawdown(pd.DataFrame({"early": early, "late": late})
+                                 [idx.year < 2004], spx_syn[idx.year < 2004])
+    assert pd.isna(corr["late"]) and not pd.isna(corr["early"]), "late is unseen, early is judged"
+    corr = rank_against_drawdown(pd.DataFrame({"early": early, "late": late}), spx_syn)
+    assert not pd.isna(corr["late"]), "late is judged once it has history"
+
+    # A January that clears the bar with too few factors does not count as a
+    # year: one indicator at its own 90th percentile is not a composite reading.
+    n = 252 * 5
+    idx = pd.bdate_range("2000-01-01", periods=n)
+    spx_syn = pd.Series(100.0 + pd.Series(range(n)).mod(50).values, index=idx)
+    one = pd.DataFrame({"x": pd.Series(range(n), index=idx, dtype=float) % 100})
+    o, p_ = walk_forward(one, spx_syn)
+    assert o.empty and not p_, "one factor is not a bench"
+
+    # Walk-forward chance: what a year reads must not depend on what came after.
+    n = 252 * 6
+    idx = pd.bdate_range("2012-01-01", periods=n)
+    wf = pd.Series([(i * 37) % 100 for i in range(n)], index=idx, dtype=float)
+    hit_a = wf > 70
+    hit_b = hit_a.copy()
+    hit_b[idx.year >= 2016] = ~hit_b[idx.year >= 2016]  # flip the future
+    pa, _ = chance_walk_forward(wf, wf, hit_a)
+    pb, _ = chance_walk_forward(wf, wf, hit_b)
+    assert pa[idx.year == 2015].equals(pb[idx.year == 2015]), "2015 saw 2016"
+    assert not pa[idx.year == 2017].equals(pb[idx.year == 2017]), "2017 must see 2016"
+
     # The relative score must put 0 at the calmest reading and 100 at the worst,
     # so the dial spans the evidence rather than a corner of it.
     assert round(relative(curve["rate"].min(), curve), 6) == 0
@@ -568,7 +658,11 @@ def build(a, live: bool = False) -> str | None:
     if br.empty:
         print("no breadth.csv - running without the constituent factors; "
               "build it with `python breadth.py`", file=sys.stderr)
-    pc = alpha.load()
+    # CBOE's whole-market ratio (pcr.py) is the series with history; the SPY
+    # chain from Alpha Vantage stands in only while the CBOE file is still short.
+    pc = pcr.load()["total"]
+    if len(pc) < alpha.NEED_ROWS:
+        pc = alpha.load()["full_chain"]
     if 0 < len(pc) < alpha.NEED_ROWS:
         print(f"put/call history is {len(pc)} rows, needs {alpha.NEED_ROWS} "
               f"before it can be ranked - left out of the score", file=sys.stderr)
@@ -577,9 +671,9 @@ def build(a, live: bool = False) -> str | None:
         print("no valuation.csv - running without pe_stretch; "
               "build it with `python valuation.py`", file=sys.stderr)
     ranked = candidates(px, br, pc, val).apply(pct_rank, lookback=a.lookback)
-    # Selection and the walk-forward want complete rows; the live reading does
-    # not, and must not be dragged a month back by one lagging feed.
-    hist = ranked.dropna()
+    # Rows with nothing in them are the rank warm-up; everything else stays,
+    # complete or not - see walk_forward.
+    hist = ranked.dropna(how="all")
     behind = stale(px)
 
     oos, picks = walk_forward(hist, spx)
@@ -647,8 +741,8 @@ def build(a, live: bool = False) -> str | None:
 
     # The daily series, exported whether the page is the plain one or the full
     # one, so the number can be read somewhere other than this dashboard.
-    curve = calibration(oos, fwd_drawdown(spx.reindex(oos.index)) <= EVENT_DEPTH)
-    pct = chance(res["MSS"], curve)
+    hit = fwd_drawdown(spx.reindex(oos.index)) <= EVENT_DEPTH
+    pct, curve = chance_walk_forward(res["MSS"], oos, hit)
     export = pd.DataFrame({
         "score": relative(pct, curve).round(1),   # 0-100 against the observed range
         "chance_pct": pct.round(1),               # what it means, in percent
@@ -712,6 +806,12 @@ def reanalyse(a, state, note) -> None:
         except Exception as exc:
             note(f"Options failed: {exc}")
 
+    note("Gathering CBOE put/call")
+    try:
+        fetched, stored = pcr.gather(note=note)
+        note(f"CBOE put/call: {fetched} new, {stored} of {alpha.NEED_ROWS} rows")
+    except Exception as exc:
+        note(f"CBOE put/call failed: {exc}")
     note("Rescoring")
     state["page"] = build(a, live=True)
     state["built"] = pd.Timestamp.now()
@@ -770,7 +870,7 @@ def serve(a, port: int) -> int:
     """
     import socket
     import threading
-    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     url = f"http://127.0.0.1:{port}/"
 
@@ -868,8 +968,13 @@ def serve(a, port: int) -> int:
         def log_message(self, *args):  # one line per refresh is enough
             pass
 
-    class Server(HTTPServer):
+    class Server(ThreadingHTTPServer):
         allow_reuse_address = False  # backstop for the race the probe cannot close
+        # Threaded on purpose: a browser holds its keep-alive socket open between
+        # clicks, and a single-threaded server sits inside that idle connection
+        # instead of accepting the next one - the page then hangs for everyone,
+        # including the daily re-analysis trigger.
+        daemon_threads = True
 
     try:
         httpd = Server(("127.0.0.1", port), Handler)

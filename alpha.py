@@ -87,7 +87,10 @@ def load() -> pd.DataFrame:
     """The put-call history gathered so far, oldest first."""
     if not CSV.exists():
         return pd.DataFrame(columns=["full_chain", "front"], index=pd.DatetimeIndex([], name="date"))
-    return pd.read_csv(CSV, index_col=0, parse_dates=True).sort_index()
+    frame = pd.read_csv(CSV, index_col=0, parse_dates=True).sort_index()
+    # The endpoint answers 0.0 for a session it has not tallied yet, and a zero
+    # ranked against a year of real ratios is the lightest put buying on record.
+    return frame[(frame > 0).all(axis=1)]
 
 
 def wanted(sessions: pd.DatetimeIndex, have: pd.DatetimeIndex, budget: int) -> list[pd.Timestamp]:
