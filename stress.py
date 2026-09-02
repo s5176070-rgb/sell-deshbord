@@ -791,7 +791,8 @@ def build(a, live: bool = False) -> str | None:
                         float(ev.loc["all days", "rate"]),  # the everyday chance
                         curve["rate"].max(), curve["rate"].min(),
                         res.index[-1], px, res, chosen, br, a.days, live, held_back,
-                        history=export["score"], far=far, ev=ev)
+                        history=export["score"], far=far, ev=ev,
+                        span=(oos.index[0].year, oos.index[-1].year))
 
 
 def reanalyse(a, state, note) -> None:
