@@ -456,7 +456,8 @@ def simple(score: float, chance_now: float, base: float, ceiling: float, floor: 
            br: pd.DataFrame, days: int = 63,
            live: bool = False, held_back: str | None = None,
            history: pd.Series | None = None, far: dict | None = None,
-           ev: pd.DataFrame | None = None) -> str:
+           ev: pd.DataFrame | None = None,
+           span: tuple[int, int] | None = None) -> str:
     """One screen: today's score, its factors, and the track record behind them.
     Broadsheet design system (light, RTL, serif) - the handoff in
     design_handoff_market_stress_dashboard/, recreated with real values.
@@ -476,6 +477,10 @@ def simple(score: float, chance_now: float, base: float, ceiling: float, floor: 
     versus = ("נמוך מהנורמה" if chance_now < base * 0.9 else
               "גבוה מהנורמה" if chance_now > base * 1.1 else "קרוב לנורמה")
     times = chance_now / base if base else 1.0
+    # Spelled from the walk-forward's own span. It read "fifteen years" while
+    # the record ran 1999-2026, which is the kind of number that goes wrong
+    # quietly every time the history moves.
+    years_text = f' מאז <span dir="ltr">{span[0]}</span>' if span else ""
 
     nav_buttons = ('<button id="refresh" type="button" class="btn btn-primary">רענון</button>'
                    '<button id="analyze" type="button" class="btn btn-secondary">חישוב מחדש</button>'
@@ -521,20 +526,35 @@ def simple(score: float, chance_now: float, base: float, ceiling: float, floor: 
             + (f' ב-<span dir="ltr">{r.spells:,.0f}</span> התקפים' if has_ci else "")
             + '</div></div>'
             for b, r in wf.iterrows())
+        # Whether the top two bands are separable is a fact about this run's
+        # numbers, not a permanent one - so it is read off the intervals rather
+        # than asserted in prose that goes stale the next time the table moves.
+        top = wf.loc[["70-84", "85+"]] if {"70-84", "85+"} <= set(wf.index) else None
+        overlap = ""
+        if top is not None and has_ci and top["ci_spells"].notna().all():
+            lo_hi = [(r.rate - r.ci_spells, r.rate + r.ci_spells) for _, r in top.iterrows()]
+            if lo_hi[0][1] >= lo_hi[1][0] and lo_hi[1][1] >= lo_hi[0][0]:
+                overlap = (" שני הפסים העליונים אינם נבדלים זה מזה: הטווחים שלהם "
+                           "חופפים, ולכן אי אפשר לומר שאחד מסוכן מהשני.")
         walkforward = f"""
   <h2>המסלול מחוץ למדגם</h2>
   <p class="text-muted" style="margin:0 0 var(--space-3);font-size:14px;max-width:70ch">
-    כל גורם נבחר מחדש בכל ינואר מתוך השנים שהסתיימו לפניו בלבד, ונמדד על השנה שאחריו.
-    <span dir="ltr">{int(ev.loc["all days", "days"]):,}</span> ימי מסחר, כולם מחוץ למדגם:
-    מתוך הימים בכל פס, כמה מהם ירדו 5% תוך עשרים מפגשים. הבסיס ליום אקראי הוא
-    <span dir="ltr">{base:.1f}%</span>.</p>
+    קל לבנות מודל שמנבא מצוין את העבר: מסתכלים על כל ההיסטוריה, בוחרים את מה שעבד,
+    ומראים כמה טוב זה &rdquo;ניבא&ldquo;. כאן זה חסום. בכל ינואר הגורמים נבחרים מחדש
+    מתוך השנים שכבר הסתיימו, ונמדדים על השנה שאחריהן &mdash; בלי לראות יום אחד קדימה.
+    כך נמדדו <span dir="ltr">{int(ev.loc["all days", "days"]):,}</span> ימי מסחר, וכולם
+    ללא הצצה. השאלה בכל יום אחת: האם המדד ירד 5% או יותר בעשרים ימי המסחר שאחריו.
+    ביום אקראי התשובה חיובית ב-<span dir="ltr">{base:.1f}%</span> מהמקרים; מה שמופיע
+    למטה הוא אותה שאלה, מחולקת לפי הציון של אותו יום.</p>
   <div style="display:grid;grid-template-columns:repeat({len(wf)},1fr);
               gap:var(--space-3);margin-bottom:var(--space-3)">{cards}</div>
   <p class="note" style="font-size:12px;margin:0 0 var(--space-8);max-width:70ch">
-    הפס נקבע לפי הציון הגולמי, לא לפי הציון המכויל שבראש הדף &mdash; שני סולמות
-    שונים. הטווח הוא רווח סמך 95% שנספר לפי התקפים ולא לפי ימים: חלון החיזוי הוא
-    עשרים יום, כך שימים סמוכים אינם תצפיות נפרדות. שני הפסים העליונים אינם
-    נבדלים זה מזה במדגם הזה.</p>"""
+    הפסים נקבעים לפי הציון הגולמי, והמספר הגדול בראש הדף הוא הציון המכויל &mdash;
+    שני סולמות של אותה תופעה, ולכן אין ביניהם התאמה מדויקת.
+    המספר שאחרי ה-&plusmn; הוא טווח הביטחון, והוא נספר לפי התקפים ולא לפי ימים:
+    חלון החיזוי הוא עשרים יום, כך ששני ימים סמוכים מצביעים על אותה נפילה ואינם שתי
+    תצפיות נפרדות. פס עם הרבה ימים אבל מעט התקפים הוא מדגם קטן, גם כשהוא לא נראה
+    כזה.{overlap}</p>"""
 
     since2000 = ""
     if far:
@@ -568,12 +588,13 @@ def simple(score: float, chance_now: float, base: float, ceiling: float, floor: 
   {since2000}
   <p class="text-muted" style="margin:0 0 var(--space-2);font-size:14px;max-width:70ch">
     מה הציון אומר בפועל: מתוך מאה ימים שדומים להיום, <span dir="ltr">{chance_now:.0f}%</span>
-    נפלו 5% ומעלה תוך חודש.</p>
+    נפלו 5% ומעלה תוך חודש. גם המספר הזה נקרא מול שנים קודמות בלבד: העקומה שממירה
+    ציון להסתברות נבנית מחדש בכל שנה, מהימים שכבר הסתיימו, ולא מהשנה שהיא מודדת.</p>
   <p class="text-muted" style="margin:0 0 var(--space-8);font-size:14px;max-width:70ch">
     היום <b style="color:var(--color-text)">{versus}</b> &mdash; פי
     <span dir="ltr">{times:.1f}</span> מההסתברות הרגילה של <span dir="ltr">{base:.0f}%</span>.
     הציון עצמו שווה 0 בערך של <span dir="ltr">{floor:.0f}%</span> ו-100 בערך של
-    <span dir="ltr">{ceiling:.0f}%</span> &mdash; היום הכי רגוע והכי קשה בחמש עשרה השנים האחרונות.</p>
+    <span dir="ltr">{ceiling:.0f}%</span> &mdash; היום הכי רגוע והכי קשה{years_text}.</p>
 
   <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:var(--space-3);margin-bottom:var(--space-8)">
     <div class="card"><div class="card-kicker">ציון</div><div class="card-title" dir="ltr">{score:.0f}</div></div>

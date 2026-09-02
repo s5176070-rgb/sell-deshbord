@@ -37,12 +37,13 @@ import pandas as pd
 import alpha
 import board
 import breadth
+import debt
 import pcr
 import valuation
 from cvs import closes, forward, patch, pct_rank, regimes, stale
 
 TICKERS = ["^GSPC", "^VIX", "^VIX3M", "^VVIX", "RSP", "SPY", "XLY", "XLP", "XLU", "HYG",
-           "LQD", "TLT", "^TNX", "^IRX",
+           "LQD", "TLT", "^TNX", "^IRX", "^TYX",
            # The 2026 additions, auditioned in bench_new.py: small caps, semis,
            # transports and the two safety bids all cleared the bar in every one
            # of the fourteen yearly selections. ^SKEW and CL=F also cleared it
@@ -82,7 +83,8 @@ STAMP = Path(__file__).with_name(".last_analysis")
 
 
 def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
-               pc: pd.Series | None = None, val: pd.DataFrame | None = None) -> pd.DataFrame:
+               pc: pd.Series | None = None, val: pd.DataFrame | None = None,
+               gov: pd.DataFrame | None = None) -> pd.DataFrame:
     """Every raw reading worth testing. Higher must mean *more* stress, always.
 
     Signs are set here and nowhere else, so the bench measures direction as
@@ -187,6 +189,25 @@ def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
     c["yield_low"] = -px["^TNX"]
     c["short_rate_down_20"] = -px["^IRX"].diff(20)
 
+    # The long end, which nothing above was asking about. `curve_flat` and
+    # `rates_up_20` are both read off the ten-year; the story told about 2026 -
+    # thirty-year yields at levels Britain has not seen since 1998 and Japan
+    # since 1996 - is about the other end of the curve, where the buyer of last
+    # resort is a pension fund and not a central bank.
+    #
+    # Both directions of the ten-year already failed symmetrically here: yield
+    # low reads -0.044 and yield high +0.044 against a -0.06 bar, which is not
+    # a sign error but an absence. That says nothing about the thirty-year,
+    # which has never been on the bench, so it is asked properly:
+    long_yield = px["^TYX"]
+    c["long_yield_high"] = long_yield
+    c["long_yield_up_20"] = long_yield.diff(20)
+    # The term premium: the long end selling off harder than the ten-year is
+    # the specific shape of a funding scare, and it is not what curve_flat
+    # measures - that one is the ten-year against the thirteen-week bill.
+    c["term_premium"] = long_yield - px["^TNX"]
+    c["term_premium_20"] = (long_yield - px["^TNX"]).diff(20)
+
     # The long-history bench (bench_new.py, judged 2012-2026 each January on
     # prior years only) - every one of these cleared the bar in all fourteen
     # selections, with correlations stronger than most of the incumbents.
@@ -257,6 +278,53 @@ def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
         c["puts_heavy"] = chain
         c["puts_light"] = -chain
         c["puts_change_20"] = -chain.diff(20)
+
+    if gov is not None and not gov.empty:
+        # Federal borrowing, counted rather than priced (see debt.py). The
+        # level is not offered: it only ever rises, so ranked against its own
+        # year it reads ~100 every day and separates nothing. The pace can go
+        # either way, and the pace is what the claim is actually about -
+        # "swelling deficits", "huge issuance". Daily net issuance is exactly
+        # what the change in debt outstanding measures.
+        #
+        # Sign as the claim is usually made: borrowing faster is more stress.
+        # `select` keeps only candidates pointing one way, so if the truth is
+        # the opposite these fail rather than quietly inverting.
+        #
+        # These clear the bar and are picked in most years, and they are the
+        # reason the top band reads 1.97x instead of 1.71x. Read the split
+        # before believing the headline, though - correlation with the forward
+        # drawdown, above and below the index's own 200-day:
+        #
+        #                        all    above 200d   below 200d
+        #   debt_growth_20     -0.094     -0.044       -0.121
+        #   debt_growth_60     -0.077     -0.005       -0.098
+        #   debt_public_share  -0.076     -0.036       -0.212
+        #   vix_level          -0.157     -0.091       -0.033
+        #
+        # Almost all of it is below the 200-day, which is the regime where the
+        # score as a whole separates nothing (see the note on the page). Above
+        # it - 85% of days, and the only place this dashboard claims to work -
+        # borrowing pace is close to nil. The percentiles say why: the 20-day
+        # pace read 98 in October 2008 and 98 in April 2020. Treasury borrows
+        # hardest once the recession has already arrived, so this is largely a
+        # crisis being measured rather than one being predicted.
+        #
+        # They stay because the bench picked them on rules set before the
+        # question was asked, and because 2011, 2013 and 2023 - ceiling
+        # standoffs at 89, 68 and 91 - are not recessions. But nobody should
+        # read this as federal debt calling a top.
+        total = gov["total"].reindex(px.index, method="ffill", limit=10)
+        c["debt_growth_60"] = total.pct_change(60)
+        c["debt_growth_20"] = total.pct_change(20)
+        # Borrowing faster than it has been: this quarter's pace against the
+        # year's, which is the acceleration rather than the level of the pace.
+        c["debt_accel"] = total.pct_change(60) - total.pct_change(252) / 4
+        # Who is being made to hold it. Debt held by the public is the part
+        # sold into the market rather than to the government's own trust
+        # funds, so a rising share is supply the market has to absorb.
+        c["debt_public_share"] = (gov["public"] / gov["total"]).reindex(
+            px.index, method="ffill", limit=10)
 
     if val is not None and not val.empty:
         # Trailing S&P 500 P/E (see valuation.py) - the same question the
@@ -685,7 +753,11 @@ def build(a, live: bool = False) -> str | None:
     if val.empty:
         print("no valuation.csv - running without pe_stretch; "
               "build it with `python valuation.py`", file=sys.stderr)
-    ranked = candidates(px, br, pc, val).apply(pct_rank, lookback=a.lookback)
+    gov = debt.load()
+    if gov.empty:
+        print("no debt.csv - running without the federal borrowing factors; "
+              "build it with `python debt.py`", file=sys.stderr)
+    ranked = candidates(px, br, pc, val, gov).apply(pct_rank, lookback=a.lookback)
     # Rows with nothing in them are the rank warm-up; everything else stays,
     # complete or not - see walk_forward.
     hist = ranked.dropna(how="all")
@@ -791,7 +863,8 @@ def build(a, live: bool = False) -> str | None:
                         float(ev.loc["all days", "rate"]),  # the everyday chance
                         curve["rate"].max(), curve["rate"].min(),
                         res.index[-1], px, res, chosen, br, a.days, live, held_back,
-                        history=export["score"], far=far, ev=ev)
+                        history=export["score"], far=far, ev=ev,
+                        span=(oos.index[0].year, oos.index[-1].year))
 
 
 def reanalyse(a, state, note) -> None:
@@ -822,6 +895,14 @@ def reanalyse(a, state, note) -> None:
             note(f"Options: {fetched} new, {stored} of {alpha.NEED_ROWS} rows")
         except Exception as exc:
             note(f"Options failed: {exc}")
+
+    note("Refreshing federal debt")
+    try:
+        frame = debt.fetch()
+        frame.to_csv(debt.CSV, index_label="date")
+        note(f"Debt: {len(frame)} rows to {frame.index[-1]:%Y-%m-%d}")
+    except Exception as exc:
+        note(f"Debt refresh failed, keeping the cached file: {exc}")
 
     note("Gathering CBOE put/call")
     try:
