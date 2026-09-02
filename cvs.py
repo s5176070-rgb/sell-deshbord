@@ -60,7 +60,13 @@ HORIZONS = [5, 10, 20, 40]
 # here on purpose - the same comparison puts it 2.61 apart at worst, so whatever
 # CBOE's VIX file holds, it is not the series yfinance serves. VVIX has no CLOSE
 # column at all. Verify before adding one.
-CBOE = {"^VIX3M": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX3M_History.csv"}
+# The exchange that computes these indices publishes them itself, daily, with
+# no key and no cap - and unlike yfinance it does not stop for a month. Every
+# VIX-family ticker is listed, not only the one that has broken so far: the
+# whole point is that the next outage should heal itself without a patch row.
+_CBOE_INDEX = "https://cdn.cboe.com/api/global/us_indices/daily_prices/{}_History.csv"
+CBOE = {t: _CBOE_INDEX.format(name) for t, name in
+        [("^VIX", "VIX"), ("^VIX3M", "VIX3M"), ("^VVIX", "VVIX")]}
 BUCKETS = [(0, 45), (45, 70), (70, 85), (85, 101)]
 
 
@@ -128,7 +134,10 @@ def cboe(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
             reply = requests.get(url, timeout=20, headers={"User-Agent": "market-stress"})
             reply.raise_for_status()
             hist = pd.read_csv(io.StringIO(reply.text), parse_dates=["DATE"])
-            values = hist.set_index("DATE")["CLOSE"].reindex(frame.index)
+            # Two layouts on the same host: the VIX files carry OHLC, the VVIX
+            # file is DATE,VVIX. The close is the last column either way.
+            close = "CLOSE" if "CLOSE" in hist.columns else hist.columns[-1]
+            values = hist.set_index("DATE")[close].reindex(frame.index)
         except Exception as exc:  # network, layout change, anything
             print(f"cboe {ticker} unavailable, falling back to patches.csv: "
                   f"{type(exc).__name__}", file=sys.stderr)
@@ -385,6 +394,13 @@ A factor near zero everywhere is carrying no information and its weight is being
 
 
 def selftest() -> None:
+    # Both CBOE layouts must read: OHLC for the VIX files, DATE,VVIX for VVIX.
+    for text, want in (("DATE,OPEN,HIGH,LOW,CLOSE\n01/02/2020,1,2,0,1.5\n", 1.5),
+                       ("DATE,VVIX\n01/02/2020,88.5\n", 88.5)):
+        hist = pd.read_csv(io.StringIO(text), parse_dates=["DATE"])
+        close = "CLOSE" if "CLOSE" in hist.columns else hist.columns[-1]
+        assert hist.set_index("DATE")[close].iloc[0] == want, text
+
     idx = pd.bdate_range("2020-01-01", periods=300)
     up = pd.Series(range(300), index=idx, dtype=float)
     r = pct_rank(up, 252)
