@@ -42,7 +42,7 @@ import valuation
 from cvs import closes, forward, patch, pct_rank, regimes, stale
 
 TICKERS = ["^GSPC", "^VIX", "^VIX3M", "^VVIX", "RSP", "SPY", "XLY", "XLP", "XLU", "HYG",
-           "LQD", "TLT", "^TNX", "^IRX",
+           "LQD", "TLT", "^TNX", "^IRX", "^TYX",
            # The 2026 additions, auditioned in bench_new.py: small caps, semis,
            # transports and the two safety bids all cleared the bar in every one
            # of the fourteen yearly selections. ^SKEW and CL=F also cleared it
@@ -186,6 +186,25 @@ def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
     c["yield_down_20"] = -px["^TNX"].diff(20)
     c["yield_low"] = -px["^TNX"]
     c["short_rate_down_20"] = -px["^IRX"].diff(20)
+
+    # The long end, which nothing above was asking about. `curve_flat` and
+    # `rates_up_20` are both read off the ten-year; the story told about 2026 -
+    # thirty-year yields at levels Britain has not seen since 1998 and Japan
+    # since 1996 - is about the other end of the curve, where the buyer of last
+    # resort is a pension fund and not a central bank.
+    #
+    # Both directions of the ten-year already failed symmetrically here: yield
+    # low reads -0.044 and yield high +0.044 against a -0.06 bar, which is not
+    # a sign error but an absence. That says nothing about the thirty-year,
+    # which has never been on the bench, so it is asked properly:
+    long_yield = px["^TYX"]
+    c["long_yield_high"] = long_yield
+    c["long_yield_up_20"] = long_yield.diff(20)
+    # The term premium: the long end selling off harder than the ten-year is
+    # the specific shape of a funding scare, and it is not what curve_flat
+    # measures - that one is the ten-year against the thirteen-week bill.
+    c["term_premium"] = long_yield - px["^TNX"]
+    c["term_premium_20"] = (long_yield - px["^TNX"]).diff(20)
 
     # The long-history bench (bench_new.py, judged 2012-2026 each January on
     # prior years only) - every one of these cleared the bar in all fourteen
