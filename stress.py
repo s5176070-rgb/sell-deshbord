@@ -493,7 +493,15 @@ def chance_walk_forward(scores: pd.Series, oos: pd.Series, hit: pd.Series,
     `warmup` years have no prior out-of-sample days to draw one from and read
     off the first curve that exists - the one honest exception, and a small one.
     The tail of each training slice is cut as in rank_against_drawdown, for the
-    same reason. Returns the daily chance and the curve today reads against.
+    same reason.
+
+    Returns the daily chance, the curve today reads against, and the floor and
+    ceiling of the curve each row was read off. `relative` needs those per row:
+    normalising every year against the latest curve's range - which is what
+    happens if only one curve comes back - puts 45% of the history outside
+    0-100, because a curve drawn in 2003 spans a different range from one drawn
+    in 2026. The rank has to be against what the model had seen by then, which
+    is the same rule the rest of the walk-forward follows.
     """
     first = oos.index[0].year + warmup
     curves = {}
@@ -501,12 +509,13 @@ def chance_walk_forward(scores: pd.Series, oos: pd.Series, hit: pd.Series,
         past = oos[oos.index < f"{year}-01-01"].iloc[:-EVENT_DAYS]
         curves[year] = calibration(past, hit.reindex(past.index))
     out = pd.Series(index=scores.index, dtype=float)
-    for year, curve in curves.items():
-        rows = scores.index.year == year
+    lo = pd.Series(index=scores.index, dtype=float)
+    hi = pd.Series(index=scores.index, dtype=float)
+    for year, curve in list(curves.items()) + [(None, curves[first])]:
+        rows = (scores.index.year < first) if year is None else (scores.index.year == year)
         out[rows] = chance(scores[rows], curve)
-    warm = scores.index.year < first
-    out[warm] = chance(scores[warm], curves[first])
-    return out, curves[max(curves)]
+        lo[rows], hi[rows] = curve["rate"].min(), curve["rate"].max()
+    return out, curves[max(curves)], pd.DataFrame({"lo": lo, "hi": hi})
 
 
 def stability(picks: dict[int, list[str]], names: list[str]) -> pd.DataFrame:
@@ -601,10 +610,16 @@ def selftest() -> None:
     hit_a = wf > 70
     hit_b = hit_a.copy()
     hit_b[idx.year >= 2016] = ~hit_b[idx.year >= 2016]  # flip the future
-    pa, _ = chance_walk_forward(wf, wf, hit_a)
-    pb, _ = chance_walk_forward(wf, wf, hit_b)
+    pa, _, ba = chance_walk_forward(wf, wf, hit_a)
+    pb, _, _ = chance_walk_forward(wf, wf, hit_b)
     assert pa[idx.year == 2015].equals(pb[idx.year == 2015]), "2015 saw 2016"
     assert not pa[idx.year == 2017].equals(pb[idx.year == 2017]), "2017 must see 2016"
+
+    # Every row must be ranked against the curve it was read off, or the years
+    # whose curve spanned a different range fall outside 0-100 entirely.
+    rel = (pa - ba["lo"]) / (ba["hi"] - ba["lo"]).replace(0, 1.0) * 100
+    assert ba.notna().all().all(), "every row needs a floor and a ceiling"
+    assert rel.between(-0.001, 100.001).all(), f"outside 0-100: {rel.min():.1f}..{rel.max():.1f}"
 
     # The relative score must put 0 at the calmest reading and 100 at the worst,
     # so the dial spans the evidence rather than a corner of it.
@@ -742,9 +757,11 @@ def build(a, live: bool = False) -> str | None:
     # The daily series, exported whether the page is the plain one or the full
     # one, so the number can be read somewhere other than this dashboard.
     hit = fwd_drawdown(spx.reindex(oos.index)) <= EVENT_DEPTH
-    pct, curve = chance_walk_forward(res["MSS"], oos, hit)
+    pct, curve, bounds = chance_walk_forward(res["MSS"], oos, hit)
+    span = (bounds["hi"] - bounds["lo"]).replace(0, 1.0)
     export = pd.DataFrame({
-        "score": relative(pct, curve).round(1),   # 0-100 against the observed range
+        # 0-100 against the range the curve that read this row actually spanned.
+        "score": ((pct - bounds["lo"]) / span * 100).round(1),
         "chance_pct": pct.round(1),               # what it means, in percent
         "percentile": res["MSS"].round(1),        # the raw factor average
         "regime": res["regime"],
