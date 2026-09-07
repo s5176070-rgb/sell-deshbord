@@ -38,6 +38,7 @@ import alpha
 import board
 import breadth
 import debt
+import fear
 import pcr
 import valuation
 from cvs import closes, forward, patch, pct_rank, regimes, stale
@@ -910,6 +911,13 @@ def reanalyse(a, state, note) -> None:
         note(f"CBOE put/call: {fetched} new, {stored} of {alpha.NEED_ROWS} rows")
     except Exception as exc:
         note(f"CBOE put/call failed: {exc}")
+    note("Gathering CNN fear and greed")
+    try:
+        new, total = fear.gather()
+        note(f"Fear and greed: {new} new, {total} days")
+    except Exception as exc:
+        note(f"Fear and greed failed, keeping the cached file: {exc}")
+
     note("Rescoring")
     state["page"] = build(a, live=True)
     state["built"] = pd.Timestamp.now()

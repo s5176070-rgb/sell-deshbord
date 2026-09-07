@@ -23,6 +23,7 @@ colour is painted explicitly rather than inherited.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pandas as pd
 
@@ -30,6 +31,11 @@ import pandas as pd
 # retyped: the column headers here and the columns forward() produces have to be
 # the same list, and two hardcoded copies drift silently.
 from cvs import HORIZONS
+
+# Only for the debt panel: the level is a display, not a factor - stress.py
+# builds the pace readings that are actually scored.
+import debt
+import fear
 
 SURFACE = "#232640"
 SUBJECT = "#ec4899"
@@ -661,6 +667,30 @@ def panels(px: pd.DataFrame, br: pd.DataFrame, days: int = 500) -> str:
     xly_xlp = px["XLY"] / px["XLP"]
     s5fi = br["s5fi"].reindex(px.index) if not br.empty else pd.Series(dtype=float)
     s5th = br["s5th"].reindex(px.index) if not br.empty else pd.Series(dtype=float)
+    gov = debt.load()
+    if gov.empty:
+        total = public = pd.Series(dtype=float)
+    else:
+        # Trillions, so the two lines share one axis honestly, and reindexed
+        # onto trading days so the x-axis is the same one every other panel has.
+        gov = gov.reindex(px.index, method="ffill", limit=10) / 1e12
+        total, public = gov["total"], gov["public"]
+    # The pace, in percent - the same two readings stress.py scores. Built off
+    # `total` after the reindex, so a stale patch of the feed reads flat here
+    # rather than as a jump on the day it catches up.
+    pace_60 = total.pct_change(60) * 100
+    pace_20 = total.pct_change(20) * 100
+    # CNN's index beside ours, both on the 0-100 the reader already has. Ours is
+    # inverted so high means calm on both lines - printing CNN as published
+    # keeps the number on the panel the same one on CNN's own page.
+    # score.csv is written before this page is rendered, so the percentile here
+    # is today's, not the previous run's.
+    fg = fear.load().reindex(px.index)
+    try:
+        mine = 100 - pd.read_csv(Path(__file__).with_name("score.csv"), index_col=0,
+                                 parse_dates=True)["percentile"].reindex(px.index)
+    except (OSError, KeyError):
+        mine = pd.Series(dtype=float)
     return '<div class="panels">' + "".join([
         panel("S&amp;P 500 והממוצעים שלו",
               "שלושה ממוצעים &mdash; סולם צבע אחד, כי זו סדרה מסודרת.",
@@ -687,6 +717,22 @@ def panels(px: pd.DataFrame, br: pd.DataFrame, days: int = 500) -> str:
               "אחוז מתוך 500 החברות שמעל הממוצע הנע שלהן. מחושב לפי הרכב המדד, לא דרך פרוקסי.",
               {"מעל ממוצע 50 יום": (s5fi, SUBJECT), "מעל ממוצע 200 יום": (s5th, PEER)},
               days=days, refs=[15, 70], unit="%"),
+        panel("חוב פדרלי",
+              "הסכום שהממשלה חייבת, ומתוכו החלק שמוחזק בידי הציבור. "
+              "הרמה רק עולה &mdash; מה שנכנס לציון הוא הקצב שבו היא עולה, לא הגובה עצמו.",
+              {"סה&quot;כ חוב": (total, SUBJECT), "מוחזק בידי הציבור": (public, PEER)},
+              days=days, unit="T$"),
+        panel("קצב גידול החוב",
+              "בכמה אחוזים גדל החוב ב-60 וב-20 ימי מסחר. "
+              "זו הקריאה שנכנסת לציון &mdash; והיא יכולה לרדת, בניגוד לרמה.",
+              {"60 ימים": (pace_60, SUBJECT), "20 ימים": (pace_20, RAMP[2])},
+              days=days, refs=[0], unit="%"),
+        panel("מדד הפחד והחמדנות של CNN",
+              "לתצוגה בלבד &mdash; לא נכנס לציון ולא נבדק. CNN מפרסם שנה אחת אחורה, "
+              "והבדיקה דורשת 756 ימים לפני שנת המבחן. הציון שלנו מוצג הפוך, "
+              "כדי שגבוה יסמן רגוע בשני הקווים.",
+              {"CNN": (fg, SUBJECT), "הציון שלנו, הפוך": (mine, PEER)},
+              days=days, refs=[25, 75]),
     ]) + "</div>"
 
 
