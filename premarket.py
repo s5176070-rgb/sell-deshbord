@@ -46,6 +46,11 @@ BUCKETS = [(-99, -1.5, "נפילה חדה, ‎-1.5% ומטה"),
 
 SAME_DAY_DROP = -0.02             # the "sharp fall today" the table counts
 
+# Alert levels, taken from the table itself and not from taste: a gap under
+# -0.75% has closed 2% down roughly eight times as often as an average day,
+# and one under -1.5% has done it in three sessions out of four.
+ALERT, SEVERE = -0.75, -1.5
+
 
 def ohlc(offline: bool) -> pd.DataFrame:
     """Daily open and close for the index, cached beside the other CSVs."""
@@ -116,6 +121,15 @@ def bucket_of(gap_pct: float) -> tuple[str, pd.Series | None]:
     return "מחוץ לטווח", None
 
 
+def status(gap_pct: float) -> str:
+    """The one line a scheduled run is there to print."""
+    if gap_pct <= SEVERE:
+        return f"התראה חריגה: פער פתיחה {gap_pct:+.2f}%, מתחת ל-{SEVERE}%"
+    if gap_pct <= ALERT:
+        return f"התראה: פער פתיחה {gap_pct:+.2f}%, מתחת ל-{ALERT}%"
+    return f"רגיל: פער פתיחה {gap_pct:+.2f}%, מעל סף ההתראה ({ALERT}%)"
+
+
 def report(offline: bool) -> None:
     t = table(offline)
     if not offline:
@@ -123,6 +137,7 @@ def report(offline: bool) -> None:
         es = now["ES=F"] * 100
         stamp = now["ES=F_at"].tz_convert("Asia/Jerusalem").strftime("%d.%m %H:%M")
         print("— פרימרקט —")
+        print(status(es))
         print(f"חוזי S&P: {es:+.2f}%   SPY: {now['SPY'] * 100:+.2f}%"
               f"   ({stamp} שעון ישראל)")
         label, _ = bucket_of(es)
@@ -150,6 +165,9 @@ def selftest() -> None:
     assert (g["same_day"] == 0).all(), g["same_day"]
     assert bucket_of(-2.0)[0] == BUCKETS[0][2]
     assert bucket_of(0.0)[0] == BUCKETS[3][2]
+    assert status(-2.0).startswith("התראה חריגה"), status(-2.0)
+    assert status(-1.0).startswith("התראה:"), status(-1.0)
+    assert status(-0.3).startswith("רגיל"), status(-0.3)
     print("selftest ok")
 
 
