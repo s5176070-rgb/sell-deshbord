@@ -63,7 +63,15 @@ EVENT_DAYS, EVENT_DEPTH = 20, -0.05
 # Bump on any change that moves the published numbers - a new factor, a new
 # band, a different calibration. It rides along in score_meta.json so a reading
 # can be told apart from one this model would not have produced.
-MODEL_VERSION = "2026.09"
+MODEL_VERSION = "2026.09b"
+# Out-of-sample days a calibration curve needs behind it before the chance it
+# produces may be published. Below this the curve is drawn from one market mood:
+# the 2003 curve, trained on 1999-2002, promised an average 50% against 8.4%
+# realised, and in several years cummax flattened it into a single constant that
+# carried no information at all. Seven and a half years is the shortest window
+# measured to beat its own base rate; see CALIBRATION.md. Days before the first
+# qualifying January get no chance_pct rather than a made-up one.
+MIN_CAL = 1890
 # A candidate has to beat this correlation against forward drawdown on the
 # years available at the time to be let into the composite. One bar, all years.
 MIN_CORR = -0.06
@@ -507,7 +515,7 @@ def event_rate(spx: pd.Series, mss: pd.Series) -> pd.DataFrame:
     return pd.DataFrame(rows).set_index("band")
 
 
-def calibration(oos: pd.Series, hit: pd.Series, bins: int = 10) -> pd.DataFrame:
+def calibration(oos: pd.Series, hit: pd.Series, bins: int = 5) -> pd.DataFrame:
     """Turn the score into an actual chance of a fall, from the walk-forward days.
 
     The score is a percentile - it says where today sits against its own past,
@@ -519,6 +527,11 @@ def calibration(oos: pd.Series, hit: pd.Series, bins: int = 10) -> pd.DataFrame:
     The curve is forced upward-only. More stress must never map to less risk;
     where the raw groups dip it is the sample being thin, not the market saying
     something, and a dip would show as a falling gauge on a rising score.
+
+    Five buckets, not ten. Ten measured worse on every count - Brier, AUC and
+    the reliability gaps - because a bucket of a few hundred days estimates its
+    own rate too loosely, and cummax then locks the loosest one in for every
+    bucket above it.
     """
     group = pd.qcut(oos, bins, labels=False, duplicates="drop")
     table = pd.DataFrame({"g": group, "score": oos, "hit": hit.reindex(oos.index)})
@@ -559,36 +572,46 @@ def relative(chance_pct, curve: pd.DataFrame):
 
 
 def chance_walk_forward(scores: pd.Series, oos: pd.Series, hit: pd.Series,
-                        warmup: int = 2) -> tuple[pd.Series, pd.DataFrame]:
+                        min_days: int = MIN_CAL,
+                        ) -> tuple[pd.Series, pd.DataFrame, pd.DataFrame]:
     """Read every day off a curve built only from out-of-sample years before it.
 
     The factors are re-picked each January on prior years; the curve that turns
     their average into "this many fell" must be held to the same rule, or the
     chance shown for a day is partly counted from that day's own outcome. Each
-    year reads against the curve its January could have drawn. The first
-    `warmup` years have no prior out-of-sample days to draw one from and read
-    off the first curve that exists - the one honest exception, and a small one.
-    The tail of each training slice is cut as in rank_against_drawdown, for the
-    same reason.
+    year reads against the curve its January could have drawn. The tail of each
+    training slice is cut as in rank_against_drawdown, for the same reason.
+
+    A January with fewer than `min_days` out-of-sample days behind it draws no
+    curve, and its year gets no chance at all. There is no honest reading to
+    give those years: a curve trained on one bear market says 50% every day
+    through a calm one, and a shorter window with cummax collapses to a
+    constant. NaN says "not enough evidence yet", which is what happened, and
+    the fitted-era rows carry it too - they are before the first curve by
+    construction.
 
     Returns the daily chance, the curve today reads against, and the floor and
     ceiling of the curve each row was read off. `relative` needs those per row:
     normalising every year against the latest curve's range - which is what
-    happens if only one curve comes back - puts 45% of the history outside
-    0-100, because a curve drawn in 2003 spans a different range from one drawn
+    happens if only one curve comes back - puts much of the history outside
+    0-100, because a curve drawn in 2010 spans a different range from one drawn
     in 2026. The rank has to be against what the model had seen by then, which
     is the same rule the rest of the walk-forward follows.
     """
-    first = oos.index[0].year + warmup
     curves = {}
-    for year in range(first, scores.index[-1].year + 1):
+    for year in range(oos.index[0].year + 1, scores.index[-1].year + 1):
         past = oos[oos.index < f"{year}-01-01"].iloc[:-EVENT_DAYS]
+        if len(past) < min_days:
+            continue
         curves[year] = calibration(past, hit.reindex(past.index))
+    if not curves:
+        raise RuntimeError(f"no year has {min_days} out-of-sample days behind it "
+                           "- there is no calibrated chance to publish")
     out = pd.Series(index=scores.index, dtype=float)
     lo = pd.Series(index=scores.index, dtype=float)
     hi = pd.Series(index=scores.index, dtype=float)
-    for year, curve in list(curves.items()) + [(None, curves[first])]:
-        rows = (scores.index.year < first) if year is None else (scores.index.year == year)
+    for year, curve in curves.items():
+        rows = scores.index.year == year
         out[rows] = chance(scores[rows], curve)
         lo[rows], hi[rows] = curve["rate"].min(), curve["rate"].max()
     return out, curves[max(curves)], pd.DataFrame({"lo": lo, "hi": hi})
@@ -658,6 +681,10 @@ def describe(export: pd.DataFrame, curve: pd.DataFrame, ev: pd.DataFrame,
         },
         "history_from": f"{export.index[0]:%Y-%m-%d}",
         "walk_forward_from": f"{export.index[export['walk_forward']][0]:%Y-%m-%d}",
+        # Later than walk_forward_from: the factors were picked out of sample
+        # years before any curve had MIN_CAL days behind it. Rows before this
+        # have a percentile and a regime but no chance_pct.
+        "calibrated_from": f"{export.index[export['chance_pct'].notna()][0]:%Y-%m-%d}",
         "data_as_of": f"{export.index[-1]:%Y-%m-%d}",   # the last session scored
         "computed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         # Two files, one run: a summary printed from a score.csv whose digest
@@ -748,16 +775,29 @@ def selftest() -> None:
     hit_a = wf > 70
     hit_b = hit_a.copy()
     hit_b[idx.year >= 2016] = ~hit_b[idx.year >= 2016]  # flip the future
-    pa, _, ba = chance_walk_forward(wf, wf, hit_a)
-    pb, _, _ = chance_walk_forward(wf, wf, hit_b)
+    pa, _, ba = chance_walk_forward(wf, wf, hit_a, min_days=252)
+    pb, _, _ = chance_walk_forward(wf, wf, hit_b, min_days=252)
     assert pa[idx.year == 2015].equals(pb[idx.year == 2015]), "2015 saw 2016"
     assert not pa[idx.year == 2017].equals(pb[idx.year == 2017]), "2017 must see 2016"
 
-    # Every row must be ranked against the curve it was read off, or the years
-    # whose curve spanned a different range fall outside 0-100 entirely.
-    rel = (pa - ba["lo"]) / (ba["hi"] - ba["lo"]).replace(0, 1.0) * 100
-    assert ba.notna().all().all(), "every row needs a floor and a ceiling"
+    # A year whose training window is short of min_days gets no chance at all,
+    # rather than one read off a curve built from too little to mean anything.
+    assert pa[idx.year == 2012].isna().all(), "the first year has nothing behind it"
+    assert pa[idx.year == 2014].notna().all(), "a year with the days behind it reads"
+    try:
+        chance_walk_forward(wf, wf, hit_a, min_days=252 * 20)
+        raise AssertionError("no year qualifies - that must fail, not publish")
+    except RuntimeError:
+        pass
+
+    # The rows that do read must be ranked against the curve they were read off,
+    # or the years whose curve spanned a different range fall outside 0-100.
+    ok = pa.notna()
+    rel = (pa[ok] - ba["lo"][ok]) / (ba["hi"] - ba["lo"])[ok].replace(0, 1.0) * 100
+    assert ba[ok].notna().all().all(), "a row with a chance needs a floor and a ceiling"
+    assert ba[~ok].isna().all().all(), "a row without one must not carry a range"
     assert rel.between(-0.001, 100.001).all(), f"outside 0-100: {rel.min():.1f}..{rel.max():.1f}"
+
 
     # The relative score must put 0 at the calmest reading and 100 at the worst,
     # so the dial spans the evidence rather than a corner of it.

@@ -152,20 +152,27 @@ def report(offline: bool = False, flag: float = 25.0) -> str:
     # Walk-forward only. The fitted era read off a curve that had seen its own
     # outcomes, and scoring the model there is scoring it on its answer sheet.
     df = df[df["walk_forward"].astype(bool)]
+    # And only the days that got a chance at all. Before the first curve with
+    # MIN_CAL days behind it there is no forecast to score - see stress.py.
+    df = df[df["chance_pct"].notna()]
     y = hits(df.index, offline)
     # The tail has a forward window that runs off the end of the data, exactly
     # as event_rate drops it, and for the same reason.
     df, y = df.iloc[:-EVENT_DAYS], y.iloc[:-EVENT_DAYS]
     p = df["chance_pct"] / 100
-    base = pd.Series(meta["baseline_rate"] / 100, index=p.index)
+    # The bar is a fixed forecast at the rate of the days actually being scored,
+    # not the all-history rate in the meta file: those cover a different, more
+    # violent stretch, and a baseline handed the wrong constant is not a bar.
+    rate = float(y.mean())
+    base = pd.Series(rate, index=p.index)
 
-    out = [f"walk-forward {df.index[0]:%Y-%m-%d} to {df.index[-1]:%Y-%m-%d}, "
+    out = [f"calibrated walk-forward {df.index[0]:%Y-%m-%d} to {df.index[-1]:%Y-%m-%d}, "
            f"{len(df)} days, {int(y.sum())} of them followed by the event",
            f"event: {meta['event_definition']}",
            "",
            "-- calibration: does 20% mean 20% --",
            f"brier  model {brier(p, y):.4f}   "
-           f"fixed {meta['baseline_rate']:.1f}% every day {brier(base, y):.4f}   "
+           f"fixed {rate * 100:.1f}% every day {brier(base, y):.4f}   "
            f"lower is better",
            reliability(p, y).to_string(),
            "",
