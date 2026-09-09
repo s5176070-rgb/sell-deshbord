@@ -41,6 +41,7 @@ import debt
 import fear
 import pcr
 import valuation
+from cvs import BANDS as cvs_bands
 from cvs import closes, forward, patch, pct_rank, regimes, stale
 
 TICKERS = ["^GSPC", "^VIX", "^VIX3M", "^VVIX", "RSP", "SPY", "XLY", "XLP", "XLU", "HYG",
@@ -57,6 +58,10 @@ START = "1990-01-01"  # ^VIX begins 1990; the ETFs join as they list
 
 # What counts as the event worth selling ahead of.
 EVENT_DAYS, EVENT_DEPTH = 20, -0.05
+# Bump on any change that moves the published numbers - a new factor, a new
+# band, a different calibration. It rides along in score_meta.json so a reading
+# can be told apart from one this model would not have produced.
+MODEL_VERSION = "2026.09"
 # A candidate has to beat this correlation against forward drawdown on the
 # years available at the time to be let into the composite. One bar, all years.
 MIN_CORR = -0.06
@@ -842,6 +847,19 @@ def build(a, live: bool = False) -> str | None:
     })
     csv = Path(__file__).with_name("score.csv")
     export.to_csv(csv, index_label="date")
+    # What the numbers in that file mean, written beside them. Readers that
+    # print "5% in 20 sessions" or the everyday baseline take them from here
+    # instead of repeating the constants and drifting when one changes.
+    Path(__file__).with_name("score_meta.json").write_text(json.dumps({
+        "model_version": MODEL_VERSION,
+        "event_days": EVENT_DAYS,
+        "event_depth": EVENT_DEPTH,
+        "baseline_rate": round(float(ev.loc["all days", "rate"]), 2),
+        "regimes": [name for name, _, _ in cvs_bands] + ["NORMAL"],
+        "flag": FLAG,
+        "data_as_of": f"{export.index[-1]:%Y-%m-%d}",
+        "computed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }, indent=2), encoding="utf-8")
     print(f"wrote {csv} - {len(export)} days")
 
     if a.full:

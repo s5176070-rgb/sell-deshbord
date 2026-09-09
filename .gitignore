@@ -5,6 +5,7 @@
 # Generated. Every one of these is rebuilt by running the scripts.
 dashboard*.html
 score.csv
+score_meta.json
 *.log
 .last_analysis
 __pycache__/
