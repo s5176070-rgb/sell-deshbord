@@ -25,7 +25,9 @@ would report the run-up to a January as calmer than it was.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import sys
 from datetime import datetime
 import time
@@ -603,6 +605,68 @@ def stability(picks: dict[int, list[str]], names: list[str]) -> pd.DataFrame:
     return out.sort_values(["in_latest", "years_picked"], ascending=False)
 
 
+def write_atomic(path: Path, text: str) -> None:
+    """Write beside the target, then rename over it.
+
+    A reader that opens score.csv while it is being rewritten otherwise gets
+    half a file, and a run killed mid-write leaves one permanently. os.replace
+    is atomic on the same filesystem, so the file is either the old one or the
+    new one and never a partial third thing.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8", newline="")
+    os.replace(tmp, path)
+
+
+def describe(export: pd.DataFrame, curve: pd.DataFrame, ev: pd.DataFrame,
+             res: pd.DataFrame) -> dict:
+    """What the numbers in score.csv mean, for whoever prints them elsewhere.
+
+    Everything a reader would otherwise re-type - the event, the everyday rate,
+    the band names - comes from here, so it moves when the model moves. The
+    sample size is the honest half of the reading: today's chance is read off
+    one bucket of the calibration curve, and a bucket of forty days does not
+    support a decimal point.
+    """
+    last_score = float(res["MSS"].iloc[-1])
+    row = curve.iloc[(curve["score"] - last_score).abs().argmin()]
+    body = export.to_csv(index_label="date")
+    return {
+        "model_version": MODEL_VERSION,
+        "event_days": EVENT_DAYS,
+        "event_depth": EVENT_DEPTH,
+        # Item by item, because "a 5% fall" is three different questions.
+        "event_definition": (
+            f"deepest CLOSE over the next {EVENT_DAYS} sessions, starting the "
+            f"session after the reading, at or below {EVENT_DEPTH:.0%} of "
+            "today's close. Close-to-close, not peak-to-trough, not intraday. "
+            "The reading day itself is not part of the window."),
+        "baseline_rate": round(float(ev.loc["all days", "rate"]), 2),
+        "baseline_days": int(ev.loc["all days", "days"]),
+        "regimes": [name for name, _, _ in cvs_bands] + ["NORMAL"],
+        "bands": {name: {"enter": hi, "exit": lo} for name, hi, lo in cvs_bands},
+        "flag": FLAG,
+        "calibration": {
+            "method": "equal-count buckets of the walk-forward days, forced "
+                      "monotone upward, read by linear interpolation",
+            "buckets": int(len(curve)),
+            # The bucket today's reading came off, and how many days built it.
+            "bucket_days": int(row["days"]),
+            "bucket_rate": round(float(row["rate"]), 2),
+            "curve_lo": round(float(curve["rate"].min()), 2),
+            "curve_hi": round(float(curve["rate"].max()), 2),
+        },
+        "history_from": f"{export.index[0]:%Y-%m-%d}",
+        "walk_forward_from": f"{export.index[export['walk_forward']][0]:%Y-%m-%d}",
+        "data_as_of": f"{export.index[-1]:%Y-%m-%d}",   # the last session scored
+        "computed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        # Two files, one run: a summary printed from a score.csv whose digest
+        # does not match this one is reading a different export.
+        "score_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest()[:16],
+        "rows": int(len(export)),
+    }
+
+
 def selftest() -> None:
     idx = pd.bdate_range("2020-01-01", periods=11)
     spx = pd.Series([100.0] * 10 + [90.0], index=idx)
@@ -846,20 +910,9 @@ def build(a, live: bool = False) -> str | None:
         "walk_forward": res.index.isin(oos.index),  # False = fitted era, weaker evidence
     })
     csv = Path(__file__).with_name("score.csv")
-    export.to_csv(csv, index_label="date")
-    # What the numbers in that file mean, written beside them. Readers that
-    # print "5% in 20 sessions" or the everyday baseline take them from here
-    # instead of repeating the constants and drifting when one changes.
-    Path(__file__).with_name("score_meta.json").write_text(json.dumps({
-        "model_version": MODEL_VERSION,
-        "event_days": EVENT_DAYS,
-        "event_depth": EVENT_DEPTH,
-        "baseline_rate": round(float(ev.loc["all days", "rate"]), 2),
-        "regimes": [name for name, _, _ in cvs_bands] + ["NORMAL"],
-        "flag": FLAG,
-        "data_as_of": f"{export.index[-1]:%Y-%m-%d}",
-        "computed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-    }, indent=2), encoding="utf-8")
+    write_atomic(csv, export.to_csv(index_label="date"))
+    write_atomic(Path(__file__).with_name("score_meta.json"),
+                 json.dumps(describe(export, curve, ev, res), indent=2))
     print(f"wrote {csv} - {len(export)} days")
 
     if a.full:

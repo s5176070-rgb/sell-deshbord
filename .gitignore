@@ -19,6 +19,7 @@ cboe_putcall.csv
 debt.csv
 alpha_context.json
 valuation.csv
+spx.csv
 
 # Windows writes this into any folder you give a custom icon or view to.
 desktop.ini
