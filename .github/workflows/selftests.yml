@@ -41,6 +41,11 @@ jobs:
       # failed in the job list instead of hiding it inside one step's log.
       - run: python cvs.py --selftest
       - run: python stress.py --selftest
+      - run: python premarket.py --selftest
+      - run: python -m unittest test_stress_logic
+      - run: python -m unittest test_website
+      - run: python test_check.py
+      - run: python eval.py --selftest
       - run: python alpha.py --selftest
       - run: python breadth.py --selftest
       - run: python valuation.py --selftest

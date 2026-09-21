@@ -5,9 +5,11 @@
 # Generated. Every one of these is rebuilt by running the scripts.
 dashboard*.html
 score.csv
+score_meta.json
 *.log
 .last_analysis
 __pycache__/
+.venv/
 *.pyc
 
 # Gathered data. Cheap to rebuild, and breadth.csv is ~160KB of numbers that
@@ -18,6 +20,7 @@ cboe_putcall.csv
 debt.csv
 alpha_context.json
 valuation.csv
+spx.csv
 
 # Windows writes this into any folder you give a custom icon or view to.
 desktop.ini
