@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from cvs import BANDS, closes
-from stress import EVENT_DAYS, EVENT_DEPTH, START, fwd_drawdown
+from stress import START, event_labels
 
 HERE = Path(__file__).parent
 CACHE = HERE / "spx.csv"   # one column, so eval.py can be re-run without waiting
@@ -35,12 +35,12 @@ CACHE = HERE / "spx.csv"   # one column, so eval.py can be re-run without waitin
 
 def hits(index: pd.Index, offline: bool) -> pd.Series:
     """Did the event follow each day - the same test stress.py calibrated on."""
-    if offline or CACHE.exists():
+    if offline:
         spx = pd.read_csv(CACHE, index_col=0, parse_dates=True).iloc[:, 0]
     else:
         spx = closes(["^GSPC"], START)[0]["^GSPC"].dropna()
         spx.to_csv(CACHE, index_label="date", header=True)
-    return (fwd_drawdown(spx.reindex(index)) <= EVENT_DEPTH)
+    return event_labels(spx).reindex(index)
 
 
 def brier(p: pd.Series, y: pd.Series) -> float:
@@ -158,7 +158,10 @@ def report(offline: bool = False, flag: float = 25.0) -> str:
     y = hits(df.index, offline)
     # The tail has a forward window that runs off the end of the data, exactly
     # as event_rate drops it, and for the same reason.
-    df, y = df.iloc[:-EVENT_DAYS], y.iloc[:-EVENT_DAYS]
+    valid = y.notna()
+    df, y = df.loc[valid], y.loc[valid].astype(bool)
+    if df.empty:
+        raise ValueError("no calibrated forecasts have complete price outcomes")
     p = df["chance_pct"] / 100
     # The bar is a fixed forecast at the rate of the days actually being scored,
     # not the all-history rate in the meta file: those cover a different, more

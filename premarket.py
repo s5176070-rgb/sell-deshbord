@@ -30,8 +30,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from eval import hits
-from stress import EVENT_DAYS, START
+from stress import START, event_labels
 
 HERE = Path(__file__).parent
 CACHE = HERE / "spx_ohlc.csv"     # open and close, so the table can run offline
@@ -79,9 +78,12 @@ def gaps(df: pd.DataFrame) -> pd.DataFrame:
 
 def table(offline: bool) -> pd.DataFrame:
     """One row per gap bucket: how many days, and what followed them."""
-    g = gaps(ohlc(offline))
-    y = hits(g.index, offline=True).iloc[:-EVENT_DAYS]
-    g = g.iloc[:-EVENT_DAYS]
+    prices = ohlc(offline)
+    g = gaps(prices)
+    y = event_labels(prices["Close"]).reindex(g.index)
+    valid = y.notna()
+    g = g.loc[valid]
+    y = y.loc[valid].astype(bool)
     rows = []
     for lo, hi, label in BUCKETS:
         m = (g["gap"] * 100 >= lo) & (g["gap"] * 100 < hi)
@@ -96,7 +98,7 @@ def table(offline: bool) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def live() -> dict[str, float]:
+def live() -> dict[str, float | pd.Timestamp]:
     """The premarket move right now, from the future and from SPY's prints."""
     import yfinance as yf
     out = {}
@@ -104,13 +106,62 @@ def live() -> dict[str, float]:
         bars = yf.download(ticker, period="5d", interval="5m", prepost=True,
                            auto_adjust=False, progress=False)
         if bars.empty:
-            sys.exit(f"אין ציטוטים ל-{ticker}.")
+            raise RuntimeError(f"אין ציטוטים ל-{ticker}.")
         close = bars["Close"].squeeze().dropna()
         close.index = close.index.tz_convert("America/New_York")
         prev = float(yf.Ticker(ticker).fast_info.previous_close)
         out[ticker] = float(close.iloc[-1]) / prev - 1
         out[ticker + "_at"] = close.index[-1]
     return out
+
+
+def market_session(at: pd.Timestamp) -> str:
+    """US equity session at a timezone-aware quote timestamp."""
+    ny = at.tz_convert("America/New_York")
+    if ny.weekday() >= 5:
+        return "סגור"
+    minutes = ny.hour * 60 + ny.minute
+    if 4 * 60 <= minutes < 9 * 60 + 30:
+        return "פרימרקט"
+    if 9 * 60 + 30 <= minutes < 16 * 60:
+        return "מסחר רגיל"
+    if 16 * 60 <= minutes < 20 * 60:
+        return "אפטר־מרקט"
+    return "סגור"
+
+
+def snapshot() -> dict:
+    """JSON-ready live context for the dashboard; never changes the MSS score."""
+    quotes = live()
+    es_at = pd.Timestamp(quotes["ES=F_at"])
+    spy_at = pd.Timestamp(quotes["SPY_at"])
+    newest = max(es_at, spy_at)
+    age = max(0, int((pd.Timestamp.now(tz="UTC") - newest.tz_convert("UTC")).total_seconds() // 60))
+    es_pct = float(quotes["ES=F"]) * 100
+    label, _ = bucket_of(es_pct)
+    history = table(offline=True)
+    match = history[history["מה קרה לפני הפתיחה"] == label]
+    historical = None
+    if not match.empty:
+        row = match.iloc[0]
+        historical = {
+            "label": label,
+            "days": int(row["ימים"]),
+            "same_day_drop_pct": float(row["ירד 2%+ באותו יום"]),
+            "drawdown_20d_pct": float(row["נפילה של 5% ב-20 יום"]),
+        }
+    return {
+        "session": market_session(newest),
+        "status": status(es_pct),
+        "is_stale": age > 30,
+        "age_minutes": age,
+        "es": {"change_pct": es_pct, "at": es_at.tz_convert("Asia/Jerusalem").isoformat()},
+        "spy": {"change_pct": float(quotes["SPY"]) * 100,
+                "at": spy_at.tz_convert("Asia/Jerusalem").isoformat()},
+        "historical": historical,
+        "source": "Yahoo Finance דרך yfinance",
+        "score_input": False,
+    }
 
 
 def bucket_of(gap_pct: float) -> tuple[str, pd.Series | None]:
@@ -168,6 +219,11 @@ def selftest() -> None:
     assert status(-2.0).startswith("התראה חריגה"), status(-2.0)
     assert status(-1.0).startswith("התראה:"), status(-1.0)
     assert status(-0.3).startswith("רגיל"), status(-0.3)
+    monday = pd.Timestamp("2026-09-14 08:00", tz="America/New_York")
+    assert market_session(monday) == "פרימרקט"
+    assert market_session(monday.replace(hour=10)) == "מסחר רגיל"
+    assert market_session(monday.replace(hour=17)) == "אפטר־מרקט"
+    assert market_session(pd.Timestamp("2026-09-13 10:00", tz="America/New_York")) == "סגור"
     print("selftest ok")
 
 

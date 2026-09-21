@@ -9,6 +9,7 @@ score_meta.json
 *.log
 .last_analysis
 __pycache__/
+.venv/
 *.pyc
 
 # Gathered data. Cheap to rebuild, and breadth.csv is ~160KB of numbers that

@@ -43,6 +43,7 @@ import debt
 import fear
 import pcr
 import valuation
+import website
 from cvs import BANDS as cvs_bands
 from cvs import closes, forward, patch, pct_rank, regimes, stale
 
@@ -63,7 +64,7 @@ EVENT_DAYS, EVENT_DEPTH = 20, -0.05
 # Bump on any change that moves the published numbers - a new factor, a new
 # band, a different calibration. It rides along in score_meta.json so a reading
 # can be told apart from one this model would not have produced.
-MODEL_VERSION = "2026.09b"
+MODEL_VERSION = "2026.09c"
 # Out-of-sample days a calibration curve needs behind it before the chance it
 # produces may be published. Below this the curve is drawn from one market mood:
 # the 2003 curve, trained on 1999-2002, promised an average 50% against 8.4%
@@ -271,7 +272,8 @@ def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
         c["breadth_rolling_200"] = -s5th.diff(20)
         # The divergence the plan is built around: the index climbing while
         # fewer and fewer names come with it.
-        c["breadth_divergence"] = spx.pct_change(20).rank(pct=True) - s5th.rank(pct=True) / 100
+        c["breadth_divergence"] = (pct_rank(spx.pct_change(20, fill_method=None), 252)
+                                   - pct_rank(s5th, 252))
 
         if "s5nh" in br.columns:
             # CNN Fear & Greed's "stock price strength" leg, not a proxy for it:
@@ -369,6 +371,14 @@ def fwd_drawdown(spx: pd.Series, days: int = EVENT_DAYS) -> pd.Series:
     return fwd_min / spx - 1
 
 
+def event_labels(spx: pd.Series) -> pd.Series:
+    """Labels on the full session index; incomplete windows remain unknown."""
+    valid = spx.where(spx > 0)
+    future = valid.iloc[::-1].rolling(EVENT_DAYS, min_periods=EVENT_DAYS).min().iloc[::-1].shift(-1)
+    return (future / valid - 1 <= EVENT_DEPTH).astype("boolean").where(
+        future.notna() & valid.notna())
+
+
 def rank_against_drawdown(ranked: pd.DataFrame, spx: pd.Series) -> pd.Series:
     """Correlation of each candidate with the drawdown that followed.
 
@@ -377,7 +387,9 @@ def rank_against_drawdown(ranked: pd.DataFrame, spx: pd.Series) -> pd.Series:
     than the one that followed - at a January cut, the twenty days whose answer
     lies on the other side of the boundary.
     """
-    dd = fwd_drawdown(spx.reindex(ranked.index))
+    # Keep the market calendar intact, and restrict outcomes to this training cut.
+    prices = spx.loc[:ranked.index[-1]]
+    dd = fwd_drawdown(prices).where(event_labels(prices).notna()).reindex(ranked.index)
     past = ranked.iloc[:-EVENT_DAYS]
     corr = past.corrwith(dd.iloc[:-EVENT_DAYS])  # pairwise: a NaN row costs only its own column
     # A column that has not yet been around for MIN_TRAIN rows is not on the
@@ -416,14 +428,16 @@ def walk_forward(ranked: pd.DataFrame, spx: pd.Series) -> tuple[pd.Series, dict[
         window = ranked[(ranked.index >= f"{year}-01-01") & (ranked.index < f"{year + 1}-01-01")]
         picks[year] = chosen
         if not window.empty:
-            pieces.append(window[chosen].mean(axis=1))
+            pieces.append(window[chosen].mean(axis=1).where(
+                window[chosen].notna().mean(axis=1) >= MIN_COVERAGE))
     return (pd.concat(pieces) if pieces else pd.Series(dtype=float)), picks
 
 
 def score(ranked: pd.DataFrame, chosen: list[str]) -> pd.DataFrame:
     """Today's composite from today's selection, plus momentum and the flag."""
     out = ranked[chosen].copy()
-    out["MSS"] = ranked[chosen].mean(axis=1)
+    out["MSS"] = ranked[chosen].mean(axis=1).where(
+        ranked[chosen].notna().mean(axis=1) >= MIN_COVERAGE)
     out["MSS_5d"] = out["MSS"].diff(5)
     out["MSS_10d"] = out["MSS"].diff(10)
     out["dispersion"] = ranked[chosen].std(axis=1)
@@ -456,6 +470,18 @@ def spells(mask: pd.Series) -> int:
     return int((mask & ~mask.shift(fill_value=False)).sum())
 
 
+def historical_scores(res: pd.DataFrame, oos: pd.Series) -> pd.DataFrame:
+    """Replace retrospectively selected scores with each year's recorded scores."""
+    res = res.copy()
+    res.loc[oos.index, "MSS"] = oos
+    res.loc[(res.index >= oos.index[0]) & ~res.index.isin(oos.index), "MSS"] = float("nan")
+    res["MSS_5d"] = res["MSS"].diff(5)
+    res["MSS_10d"] = res["MSS"].diff(10)
+    res["regime"] = regimes(res["MSS"])
+    res["signal"] = (res["MSS"] >= FLAG).rolling(3).sum() >= 2
+    return res
+
+
 def interval(p_hat: float, n: int) -> float:
     """Half-width of the 95% interval on a rate, in percentage points.
 
@@ -477,7 +503,7 @@ def event_rate(spx: pd.Series, mss: pd.Series) -> pd.DataFrame:
     dashboard already makes with walk-forward against fitted: the gap between
     the two is the finding, not either number alone.
     """
-    hit = fwd_drawdown(spx.reindex(mss.index)) <= EVENT_DEPTH
+    hit = event_labels(spx).reindex(mss.index)
     # The last EVENT_DAYS rows go, as rank_against_drawdown drops them at a
     # January cut and since2000 drops them before its own rates. Their forward
     # window runs off the end of the series: the final row is judged on one
@@ -492,7 +518,8 @@ def event_rate(spx: pd.Series, mss: pd.Series) -> pd.DataFrame:
     # synthetic slide into the edge. Either way they answer a different
     # question from every other row in the table, over a shorter horizon, and
     # averaging the two questions together is the defect.
-    mss, hit = mss.iloc[:-EVENT_DAYS], hit.iloc[:-EVENT_DAYS]
+    valid = mss.notna() & hit.notna()
+    mss, hit = mss[valid], hit[valid].astype(bool)
     base = hit.mean()
     everything = pd.Series(True, index=mss.index)
     rows = [{"band": "all days", "days": int(len(mss)), "spells": spells(everything),
@@ -533,8 +560,11 @@ def calibration(oos: pd.Series, hit: pd.Series, bins: int = 5) -> pd.DataFrame:
     own rate too loosely, and cummax then locks the loosest one in for every
     bucket above it.
     """
-    group = pd.qcut(oos, bins, labels=False, duplicates="drop")
-    table = pd.DataFrame({"g": group, "score": oos, "hit": hit.reindex(oos.index)})
+    table = pd.DataFrame({"score": oos, "hit": hit.reindex(oos.index)}).dropna()
+    if table.empty:
+        raise ValueError("calibration needs observed scores and complete outcomes")
+    table["g"] = (0 if table["score"].nunique() == 1 else
+                  pd.qcut(table["score"], bins, labels=False, duplicates="drop"))
     out = table.groupby("g").agg(score=("score", "mean"), rate=("hit", "mean"),
                                  days=("hit", "size"))
     out["rate"] = out["rate"].cummax() * 100
@@ -600,7 +630,8 @@ def chance_walk_forward(scores: pd.Series, oos: pd.Series, hit: pd.Series,
     """
     curves = {}
     for year in range(oos.index[0].year + 1, scores.index[-1].year + 1):
-        past = oos[oos.index < f"{year}-01-01"].iloc[:-EVENT_DAYS]
+        past = oos[oos.index < f"{year}-01-01"].iloc[:-EVENT_DAYS].dropna()
+        past = past[hit.reindex(past.index).notna()]
         if len(past) < min_days:
             continue
         curves[year] = calibration(past, hit.reindex(past.index))
@@ -846,6 +877,8 @@ def build(a, live: bool = False) -> str | None:
     if patched:
         print("filled from CBOE and patches.csv: "
               + ", ".join(f"{t} {n} days" for t, n in patched.items()))
+    # Auxiliary feeds may publish on dates when the equity market is closed.
+    px = px.loc[px["^GSPC"].notna()]
     spx = px["^GSPC"]
     br = breadth.load()
     if br.empty:
@@ -877,11 +910,17 @@ def build(a, live: bool = False) -> str | None:
     if oos.empty:
         raise RuntimeError("no year cleared the bar - that is the answer, not an error")
     chosen = picks[max(picks)]
+    if max(picks) != hist.index[-1].year:
+        raise RuntimeError("current year has no valid factor selection")
     res = score(ranked.loc[hist.index[0]:], chosen)
+    # Historical probabilities must read the score selected for THAT year.
+    res = historical_scores(res, oos)
 
     # Back off the tail until enough of the chosen factors actually reported.
     # Yesterday's reading over the full set beats today's over a third of it.
     covered = res[chosen].notna().mean(axis=1) >= MIN_COVERAGE
+    if not covered.any():
+        raise RuntimeError("no day has sufficient coverage for the selected factors")
     held_back = None
     if covered.any() and not covered.iloc[-1]:
         keep = covered[covered].index[-1]
@@ -938,7 +977,7 @@ def build(a, live: bool = False) -> str | None:
 
     # The daily series, exported whether the page is the plain one or the full
     # one, so the number can be read somewhere other than this dashboard.
-    hit = fwd_drawdown(spx.reindex(oos.index)) <= EVENT_DEPTH
+    hit = event_labels(spx).reindex(oos.index)
     pct, curve, bounds = chance_walk_forward(res["MSS"], oos, hit)
     span = (bounds["hi"] - bounds["lo"]).replace(0, 1.0)
     export = pd.DataFrame({
@@ -970,13 +1009,16 @@ def build(a, live: bool = False) -> str | None:
         print(f"since-2000 comparison unavailable this run: {type(exc).__name__}",
               file=sys.stderr)
         far = None
-    return board.simple(float(export["score"].iloc[-1]),
-                        float(export["chance_pct"].iloc[-1]),
-                        float(ev.loc["all days", "rate"]),  # the everyday chance
-                        curve["rate"].max(), curve["rate"].min(),
-                        res.index[-1], px, res, chosen, br, a.days, live, held_back,
-                        history=export["score"], far=far, ev=ev,
-                        span=(oos.index[0].year, oos.index[-1].year))
+    premarket_data = None
+    try:
+        import premarket as premarket_context
+        premarket_data = premarket_context.snapshot()
+    except Exception as exc:
+        print(f"premarket unavailable this run: {type(exc).__name__}", file=sys.stderr)
+    return website.render(export, res, px, chosen, ev, version=MODEL_VERSION,
+                          live=live, notice=("מוצג היום האחרון עם כיסוי נתונים מספיק."
+                                            if held_back else None),
+                          premarket=premarket_data)
 
 
 def reanalyse(a, state, note) -> None:
@@ -1104,8 +1146,11 @@ def serve(a, port: int) -> int:
             print(f"something is already serving {url} - nothing to do", file=sys.stderr)
             return 3  # serve.bat reads 3 as "stop", anything else as "restart me"
 
-    state = {"page": build(a, live=True), "built": pd.Timestamp.now()}
+    state = {"page": (website.cached_page(version=MODEL_VERSION)
+                       if getattr(a, "preview", False) else build(a, live=True)),
+             "built": pd.Timestamp.now()}
     job = {"running": False, "step": "", "log": [], "error": None, "done": 0}
+    job_lock = threading.Lock()
 
     def note(message: str) -> None:
         job["step"] = message
@@ -1124,6 +1169,7 @@ def serve(a, port: int) -> int:
             job["running"] = False
             job["step"] = ""
             job["done"] += 1
+            job_lock.release()
 
     def clock() -> None:
         """One daily re-analysis, run by the server itself.
@@ -1134,7 +1180,7 @@ def serve(a, port: int) -> int:
         """
         while True:
             try:
-                if not job["running"] and due(market_now(), last_run()):
+                if due(market_now(), last_run()) and job_lock.acquire(blocking=False):
                     job.update(running=True, step="Daily re-analysis", log=[], error=None)
                     run_job()
             except Exception as exc:
@@ -1160,8 +1206,12 @@ def serve(a, port: int) -> int:
             self._send(200, state["page"].encode("utf-8"))
 
         def do_POST(self):
+            origin = self.headers.get("Origin")
+            if origin and origin not in {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}:
+                self._send(403, b"cross-origin updates are not allowed", "text/plain")
+                return
             if self.path == "/analyze":
-                if job["running"]:
+                if not job_lock.acquire(blocking=False):
                     self._send(409, b"already running", "text/plain")
                     return
                 job.update(running=True, step="Starting", log=[], error=None)
@@ -1171,6 +1221,10 @@ def serve(a, port: int) -> int:
             if self.path != "/refresh":
                 self._send(404, b"no", "text/plain")
                 return
+            if not job_lock.acquire(blocking=False):
+                self._send(409, b"already running", "text/plain")
+                return
+            job.update(running=True, step="Refreshing", log=[], error=None)
             # flush: stdout to a pipe is block-buffered, and a server whose
             # progress only appears when it exits is a server with no progress.
             print(f"[{pd.Timestamp.now():%H:%M:%S}] refresh requested", flush=True)
@@ -1179,8 +1233,12 @@ def serve(a, port: int) -> int:
                 state["built"] = pd.Timestamp.now()
                 self._send(200, b"ok", "text/plain")
             except Exception as exc:  # the page stays on the last good reading
+                job["error"] = str(exc)
                 print(f"refresh failed: {exc}", file=sys.stderr)
                 self._send(500, str(exc).encode("utf-8"), "text/plain")
+            finally:
+                job.update(running=False, step="", done=job["done"] + 1)
+                job_lock.release()
 
         def log_message(self, *args):  # one line per refresh is enough
             pass
@@ -1199,10 +1257,11 @@ def serve(a, port: int) -> int:
         print(f"cannot bind port {port}: {exc}", file=sys.stderr)
         return 3
 
-    threading.Thread(target=clock, daemon=True).start()
-    print(f"\nserving {url} - buttons rebuild on demand, "
-          f"and it re-analyses itself once a trading day, "
-          f"{DAILY_AT:02d}:00 New York")
+    if not getattr(a, "preview", False):
+        threading.Thread(target=clock, daemon=True).start()
+    schedule = ("updates on demand" if getattr(a, "preview", False) else
+                f"daily re-analysis at {DAILY_AT:02d}:00 New York")
+    print(f"\nserving {url} - {schedule}")
     print("ctrl-c to stop", flush=True)
     if not a.no_open:
         webbrowser.open(url)
@@ -1222,6 +1281,8 @@ def main() -> int:
     ap.add_argument("--days", type=int, default=63, help="sessions shown on each chart")
     ap.add_argument("--serve", action="store_true",
                     help="hold the page open with a working Refresh button")
+    ap.add_argument("--preview", action="store_true",
+                    help="with --serve: open cached prices immediately; calculate on demand")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--start", default=START)
     ap.add_argument("--out", default="dashboard_stress.html")
