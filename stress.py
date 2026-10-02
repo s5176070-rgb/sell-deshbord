@@ -64,7 +64,7 @@ EVENT_DAYS, EVENT_DEPTH = 20, -0.05
 # Bump on any change that moves the published numbers - a new factor, a new
 # band, a different calibration. It rides along in score_meta.json so a reading
 # can be told apart from one this model would not have produced.
-MODEL_VERSION = "2026.09c"
+MODEL_VERSION = "2026.10a"
 # Out-of-sample days a calibration curve needs behind it before the chance it
 # produces may be published. Below this the curve is drawn from one market mood:
 # the 2003 curve, trained on 1999-2002, promised an average 50% against 8.4%
@@ -270,6 +270,12 @@ def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
         c["breadth_euphoria"] = s5fi
         c["breadth_rolling"] = -s5fi.diff(20)
         c["breadth_rolling_200"] = -s5th.diff(20)
+        # Two more readings of S5FI that the four above cannot give. The level
+        # is absolute and the 20-day change is slow; neither says whether 23%
+        # is thin *for this market* - a range-bound year sits lower than a
+        # trending one - or whether participation is draining this week.
+        c["breadth_stretch_50"] = -(s5fi / s5fi.rolling(252).mean() - 1)
+        c["breadth_slide_5"] = -s5fi.diff(5)
         # The divergence the plan is built around: the index climbing while
         # fewer and fewer names come with it.
         c["breadth_divergence"] = (pct_rank(spx.pct_change(20, fill_method=None), 252)
