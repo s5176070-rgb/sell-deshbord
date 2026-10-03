@@ -5,9 +5,11 @@
 # Generated. Every one of these is rebuilt by running the scripts.
 dashboard*.html
 score.csv
+score_meta.json
 *.log
 .last_analysis
 __pycache__/
+.venv/
 *.pyc
 
 # Gathered data. Cheap to rebuild, and breadth.csv is ~160KB of numbers that
@@ -18,7 +20,17 @@ cboe_putcall.csv
 debt.csv
 alpha_context.json
 valuation.csv
+spx.csv
 
 # Windows writes this into any folder you give a custom icon or view to.
 desktop.ini
 fear.csv
+
+# The motion project keeps its engine, fonts and renders as copies from the
+# skill; only the scene and its settings are ours to track.
+motion-*/core.js
+motion-*/render.py
+motion-*/audio.py
+motion-*/fonts/
+motion-*/out/
+motion-*/stills/

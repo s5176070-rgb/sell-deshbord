@@ -16,7 +16,14 @@ REM
 REM This window stays open on purpose. Closing it, or ctrl-c, stops the server.
 
 cd /d "%~dp0"
-set "PY=C:\Users\97252\thech analisis\.venv\Scripts\python.exe"
+set "PY=%~dp0.venv\Scripts\python.exe"
+
+if not exist "%PY%" (
+  echo ERROR: local Python environment not found at "%PY%" >> daily.log
+  echo Run: py -3.12 -m venv .venv
+  echo Then: .venv\Scripts\python.exe -m pip install -r requirements.txt
+  exit /b 2
+)
 
 :loop
 echo. >> daily.log

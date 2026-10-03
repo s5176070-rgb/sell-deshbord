@@ -1,5 +1,10 @@
 # Market Stress Dashboard
 
+Version 2026.09c (2026-09-12) fixes causal feature ranking, historical score
+export and event-window handling. Performance figures below predate these
+fixes and require regeneration; they do not validate the current version.
+See [LOGIC_REVIEW.md](LOGIC_REVIEW.md).
+
 A score that says how likely the next twenty sessions are to contain a 5% fall,
 and — more importantly — the evidence for whether that score is worth reading.
 
@@ -8,6 +13,23 @@ that failed is still in the repo, because knowing what didn't work is most of
 what makes the current number believable.
 
 ## Run it
+
+The default dashboard is now the responsive Hebrew Market Pulse website.
+It includes calibrated risk, raw MSS, interactive historical charts, selected
+factors, historical event rates, and the existing refresh/re-analysis controls.
+`website.py` renders the assets in `web/` into one self-contained HTML document.
+
+For an immediate local start from the existing SPX price file:
+
+```
+python stress.py --serve --preview --no-open
+```
+
+Open http://127.0.0.1:8765. This mode calculates on demand; it does not run the
+daily schedule. A missing model reading is shown explicitly. Refresh downloads
+prices and calculates the model; full analysis also rebuilds optional inputs.
+Without `--preview`, the usual initial calculation and daily schedule apply.
+`--full` retains the previous detailed evidence page.
 
 ```
 pip install -r requirements.txt
