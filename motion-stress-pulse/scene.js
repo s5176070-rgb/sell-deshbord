@@ -146,7 +146,7 @@
       const g = grp(gBands, x, 190);
       const h = rate * 8.6;
       barFill.push(rect(g, -bw / 2, -h, bw, h, {
-        background: ['#cdd8d8', '#9fb7bd', '#6b93a0', '#3f6b78'][i],
+        background: ['#aba593', '#8a8373', '#625c4e', '#3b3730'][i],
         borderRadius: '14px', transformOrigin: '50% 100%',
       }));
       barNum.push(txt(g, `${rate.toFixed(1)}%`, { size: 34, ...UI, y: -h - 36, dir: 'ltr' }));
