@@ -2,11 +2,11 @@
 
 `page.html` is the page published to the two artifact URLs. It is tracked, not
 generated: nothing in the repository can rebuild it from scratch, so losing it
-means losing the design. This script only rewrites the numbers inside it.
+means losing the design. This script only rewrites what is inside it.
 
 Its predecessors were one script per chart, kept in a temporary directory. That
 directory was cleared when the app quit and they were gone, which is why these
-two files live in the repository instead.
+files live in the repository instead.
 
 Geometry is the page's own, recovered from the published SVG and kept exactly:
   history chart  viewBox 860x200, 130 points, floor y=176.4, span 152.8
@@ -14,23 +14,29 @@ Geometry is the page's own, recovered from the published SVG and kept exactly:
   ring gauge     r=80, circumference 502.65, dial full scale 40%
 
 The band bars are NOT redrawn. Their heights come from the calibration window,
-which ends twenty sessions back and does not move day to day. Only the pill
-saying which band today sits in could move, and that is asserted instead.
+which ends twenty sessions back and does not move day to day. The pill saying
+which band today sits in does move, and that is handled.
+
+Everything here is a function of the data, including the wording that has a
+sign or a date in it - the trend arrow, the market row, the premarket strip.
+What is left for edit.py is prose that takes a judgement: how to describe the
+week, and what the sentiment reading means. That split is the whole point: a
+refresh nobody reviews must not be able to leave an arrow pointing the wrong
+way.
 
 Run from the repository root, after check.py has written today's row:
 
     python check.py
     python artifact/refresh.py
-    python artifact/edit.py      # after editing its constants
 
-refresh.py is safe to run twice; edit.py is not, and says so.
+Safe to run twice. serve.py runs both for the button on the page.
 """
 import csv
 import json
 import math
 import re
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -41,6 +47,16 @@ CHART = dict(w=860.0, n=130, floor=176.4, span=152.8)
 CARD = dict(w=260.0, n=60, floor=66.0, span=62.0)
 CIRC, DIAL = 502.65, 40.0
 BANDS = [(0, 45, 40), (45, 70, 220), (70, 85, 400), (85, 101, 580)]
+REGIME_WORD = {"NORMAL": "רגוע", "WATCH": "ערנות",
+               "ELEVATED": "מתוח", "CRITICAL": "קריטי"}
+UP = '<path d="M4 18 L10 12 L14 16 L20 8"/><path d="M14 8 H20 V14"/>'
+DOWN = '<path d="M4 9 L10 15 L14 11 L20 18"/><path d="M14 18 H20 V12"/>'
+
+sys.path.insert(0, str(PROJECT))
+import pandas as pd  # noqa: E402
+import cvs  # noqa: E402
+import eval as ev  # noqa: E402  (the project's module, shadowing nothing we use)
+import premarket as pm  # noqa: E402
 
 
 def rows(name):
@@ -64,7 +80,7 @@ def plot(values, geom):
 def one(pattern, art, flags=0):
     """The single match a rewrite expects, or a loud failure."""
     found = re.findall(pattern, art, flags)
-    assert len(found) == 1, f"{len(found)} matches for {pattern[:50]}"
+    assert len(found) == 1, f"{len(found)} matches for {pattern[:60]}"
     return re.search(pattern, art, flags)
 
 
@@ -73,12 +89,20 @@ def swap(art, pattern, new, flags=0):
     return art[:m.start()] + new + art[m.end():]
 
 
+def pct(x, places=2):
+    """A signed percentage with the mark that keeps it readable inside RTL."""
+    return f"‎{x:+.{places}f}%"
+
+
 # ---------------------------------------------------------------- model output
 score = rows("score.csv")
 today = score[-1]
 chance, mss = float(today["chance_pct"]), float(today["percentile"])
+regime = today["regime"]
+day = date.fromisoformat(today["date"])
 meta = json.load(open(PROJECT / "score_meta.json", encoding="utf-8"))
 assert meta["data_as_of"] == today["date"], "score.csv and score_meta.json disagree"
+assert regime in REGIME_WORD, f"no Hebrew word for regime {regime}"
 
 trend = mss - float(score[-6]["percentile"])
 window = [float(r["chance_pct"]) for r in score[-CHART["n"]:]]
@@ -87,10 +111,6 @@ start = date.fromisoformat(score[-CHART["n"]]["date"])
 
 # The dashed mean is the realised rate over the calibrated window, not a
 # constant. Recompute it so a doc can never outlive the code.
-sys.path.insert(0, str(PROJECT))
-import pandas as pd  # noqa: E402
-import eval as ev  # noqa: E402  (the project's module, shadowing nothing we use)
-
 dates = [r["date"] for r in score if r["date"] >= meta["calibrated_from"]]
 realised = ev.hits(pd.to_datetime(dates), offline=True).dropna()
 base = round(realised.mean() * 100, 1)
@@ -137,11 +157,25 @@ art = swap(art, r'<line x1="[\d.]+" y1="[\d.]+" x2="[\d.]+" y2="[\d.]+" '
 art = swap(art, r'הקו הדק = [\d.]+%', f"הקו הדק = {base}%")
 
 # --------------------------------------------------------------- band bar pill
+# The bars are left alone, but the pill that says "today is here" moves between
+# them whenever the score crosses a band edge.
 here = next(x for lo_b, hi_b, x in BANDS if lo_b <= mss < hi_b)
-pill = one(r'<rect x="(\d+)" y="[\d.]+" width="90" height="20" rx="10"', art)
-assert int(pill.group(1)) == here + 25, (
-    f"the 'here' pill sits on the bar at x={int(pill.group(1)) - 25}, "
-    f"today's MSS {mss} belongs on the bar at x={here}")
+top = float(one(rf'<rect x="{here}" y="([\d.]+)" width="140"', art).group(1))
+art = swap(art, r'<rect x="\d+" y="[\d.]+" width="90" height="20" rx="10"',
+           f'<rect x="{here + 25}" y="{top - 20.6:.1f}" width="90" height="20" rx="10"')
+art = swap(art, r'<text x="\d+" y="[\d.]+" text-anchor="middle" '
+                r'font-family="Rubik,sans-serif" font-size="11\.5" '
+                r'font-weight="700" fill="#fff">היום כאן',
+           f'<text x="{here + 70}" y="{top - 6.1:.1f}" text-anchor="middle" '
+           'font-family="Rubik,sans-serif" font-size="11.5" '
+           'font-weight="700" fill="#fff">היום כאן')
+
+# The bar the pill now sits on also supplies the band's own range and rate,
+# which the sentence under the chart quotes. Reading them back off the chart
+# keeps the two from ever disagreeing.
+band_rate = float(one(rf'<text x="{here + 70}" y="98"[^>]*>([\d.]+)%', art).group(1))
+band_range = one(rf'<text x="{here + 70}" y="168"[^>]*>([^<]+)</text>',
+                 art).group(1).split(" · ")[0]
 
 # ------------------------------------------------------------- context cards
 # Sentiment, debt, breadth - in page order. Two of the three share one neutral
@@ -168,14 +202,103 @@ art = swap(art, r'(?<=padding:4px 12px">)[\d.]+ · (?:פחד קיצוני|פחד
            f"{fear:.0f} · {mood}")
 art = swap(art, r'[\d.]+ טריליון \$', f"{debt:.2f} טריליון $")
 art = swap(art, r'[\d.]+% מעל ממוצע 50', f"{s5fi:.1f}% מעל ממוצע 50")
-
 quarter = [float(r["total"]) / 1e12 for r in rows("debt.csv")][-64:]
 art = swap(art, r'עלייה של כ-[\d,]+ מיליארד \$',
            f"עלייה של כ-{round((quarter[-1] - quarter[0]) * 1000):,} מיליארד $")
 
+# ---------------------------------------------------- dates, regime, the trend
+art = swap(art, r'(?<=border:1px solid #e4e0d4;padding:7px 16px">)[\d.]+(?=</div>)',
+           f"{day:%d.%m.%Y}")
+art = swap(art, r'מודל: נתוני [\d.]+', f"מודל: נתוני {day:%d.%m.%Y}")
+art = swap(art, r'(?:NORMAL|WATCH|ELEVATED|CRITICAL) · \S+(?=</div>)',
+           f"{regime} · {REGIME_WORD[regime]}")
+art = swap(art, r'<path d="M4 (?:18|9)[^/]*/><path d="M14 (?:8|18)[^/]*/></svg>\n'
+                r'          <span style="font-size:13px;font-weight:600">'
+                r'(?:עולה|יורד) 5 ימים · [^<]*</span>',
+           f'{UP if trend >= 0 else DOWN}</svg>\n'
+           '          <span style="font-size:13px;font-weight:600">'
+           f'{"עולה" if trend >= 0 else "יורד"} 5 ימים · ‎{trend:+.1f}</span>')
+
+# The band sentence and the plain-language line both name the regime, and both
+# have to name the exit threshold that is keeping it: a score of 67 reading
+# ELEVATED is only explicable if the page says 65 is where it would let go.
+exit_at = meta["bands"].get(regime, {}).get("exit")
+held = f" מצב {regime} נשמר עד ירידה מתחת ל-{exit_at}." if exit_at else ""
+art = swap(art, r'היום הציון ב-[^<]*',
+           f"היום הציון ב-{band_range}: ברמה הזו שיעור הנפילות ההיסטורי הוא "
+           f"{band_rate}%.{held}")
+because = (f" מצב {regime} נשמר בגלל סף היציאה {exit_at}."
+           if exit_at and mss < meta["bands"][regime]["enter"] else "")
+art = swap(art, r'הציון [\d.]+, והמגמה מול חמש תצפיות אחורה [^<]*',
+           f"הציון {mss}, והמגמה מול חמש תצפיות אחורה "
+           f"{'עולה' if trend >= 0 else 'יורדת'}.{because} "
+           f"ההסתברות שמפרסם המודל היא {chance}%.")
+
+# --------------------------------------------------- the market, as it stands
+# cvs.closes is the model's own price source, so the row can never disagree
+# with the score about what the index did.
+px = cvs.closes(["^GSPC", "^VIX"], "2026-01-01")[0].dropna()
+spx_chg = (px["^GSPC"].iloc[-1] / px["^GSPC"].iloc[-2] - 1) * 100
+vix, vix_chg = px["^VIX"].iloc[-1], (px["^VIX"].iloc[-1] / px["^VIX"].iloc[-2] - 1) * 100
+session = pm.market_session(pd.Timestamp.now(tz="Asia/Jerusalem"))
+open_now = session == "מסחר רגיל"
+art = swap(art, r'<path d="M4 (?:18|9)[^/]*/><path d="M14 (?:8|18)[^/]*/></svg>\n'
+                r'          <span style="font-size:13px;font-weight:600">'
+                r'(?:שוק פתוח|המסחר ננעל): S&amp;P [^<]*</span>',
+           f'{UP if spx_chg >= 0 else DOWN}</svg>\n'
+           '          <span style="font-size:13px;font-weight:600">'
+           f'{"שוק פתוח" if open_now else "המסחר ננעל"}: S&amp;P {pct(spx_chg)} · '
+           f'VIX {vix:.2f} ({pct(vix_chg, 1)})</span>')
+
+# ------------------------------------------------------------ premarket strip
+# The futures quote, its bucket and what that bucket preceded, all from the
+# table premarket.py prints, so the strip can never drift from the module.
+# The futures are not the open gap and the page says so: the buckets were cut
+# on realised open gaps, and this is the closest live proxy for one.
+quote = pm.live()
+fut = float(quote["ES=F"]) * 100
+at = pd.Timestamp(quote["ES=F_at"]).tz_convert("Asia/Jerusalem")
+last = px.index[-1].date()   # the same series the market row quotes, so the
+                             # two chips can never report different moves
+
+if open_now:
+    head, second = f"פתיחת המסחר · {at:%d.%m}, המסחר פתוח", f"כרגע {pct(spx_chg)}"
+elif at.date().weekday() >= 5:
+    monday = at.date() + timedelta(days=7 - at.date().weekday())
+    head = f"פתיחת המסחר · {monday:%d.%m}, סוף שבוע"
+    second = f"סגירה אחרונה {pct(spx_chg)} · {last:%d.%m}"
+else:
+    head = f"פתיחת המסחר · {at:%d.%m}, טרם נפתח"
+    second = f"סגירה אחרונה {pct(spx_chg)} · {last:%d.%m}"
+
+label, _ = pm.bucket_of(fut)
+name, _, span_text = label.partition(", ")
+row = pm.table(offline=True).set_index("מה קרה לפני הפתיחה").loc[label]
+art = swap(art, r'(?<=font-size:14px;font-weight:700">)פתיחת המסחר · [^<]*', head)
+art = swap(art, r'(?<=padding:4px 12px">)חוזי S&P [^<]*',
+           f"חוזי S&P {pct(fut)} · {at:%H:%M}")
+art = swap(art, r'(?<=padding:4px 12px">)(?:כרגע|סגירה אחרונה) [^<]*', second)
+art = swap(art, r'(?<=font-size:12px;margin-top:8px">)חוזי S&P בשעה [^<]*',
+           f"חוזי S&P בשעה {at:%H:%M} ב-{at:%d.%m}: {pct(fut)}, בקטגוריית "
+           f"{name} ({span_text}). במדגם {int(row['ימים']):,} ימים: "
+           f"‎{row['ירד 2%+ באותו יום']}% נסגרו בירידה של 2% ומעלה, "
+           f"ו-{row['נפילה של 5% ב-20 יום']}% לוו בנפילה של 5% בתוך 20 מפגשים. "
+           "זו השוואה לפערי פתיחה היסטוריים; החוזים עדיין אינם פער הפתיחה "
+           "בפועל. הפרימרקט לא נכנס לציון.")
+
+# ------------------------------------------------- what the sentiment card says
+prev_fear = cards[0][-2]
+moved = ("עלה" if fear > prev_fear else "ירד" if fear < prev_fear else "לא זז")
+art = swap(art, r'(?<=font-size:12px;margin-top:6px">)הסנטימנט [^<]*',
+           f"הסנטימנט {moved} ל-{fear:.1f}: {mood}. נתון "
+           f"{date.fromisoformat(rows('fear.csv')[-1]['date']):%d.%m}; "
+           "לא נכנס לציון — רק להקשר.")
+
 PAGE.write_text(art, encoding="utf-8")
-print(f"{today['date']} chance {chance} mss {mss} trend {trend:+.1f} {today['regime']}")
+print(f"{today['date']} chance {chance} mss {mss} trend {trend:+.1f} {regime}")
 print(f"chart {lo}-{hi} base {base} baseline y {ypos(base)} "
       f"last y {ypos(window[-1])} from {start}")
-print(f"gauge arc {arc} tick {base / DIAL * 360:.0f}deg  band x={here}")
-print(f"fear {fear} {mood} · debt {debt:.3f}T · s5fi {s5fi}")
+print(f"gauge arc {arc}  band {band_range} ({band_rate}%, 1 in {round(100 / band_rate)})")
+print(f"market {session}: S&P {spx_chg:+.2f}% VIX {vix:.2f} ({vix_chg:+.1f}%)")
+print(f"futures {fut:+.2f}% at {at:%H:%M} -> {label} ({int(row['ימים'])} days)")
+print(f"fear {fear:.1f} {mood} · debt {debt:.3f}T · s5fi {s5fi}")
