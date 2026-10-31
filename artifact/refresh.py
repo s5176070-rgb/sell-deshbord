@@ -261,30 +261,51 @@ at = pd.Timestamp(quote["ES=F_at"]).tz_convert("Asia/Jerusalem")
 last = px.index[-1].date()   # the same series the market row quotes, so the
                              # two chips can never report different moves
 
+# Which session the strip is about is a question about the clock, not about
+# the quote: on a Saturday morning the newest futures print is still Friday's,
+# so dating the strip from the quote would announce a session that has already
+# closed as one that has not opened.
+now = pd.Timestamp.now(tz="Asia/Jerusalem")
 if open_now:
-    head, second = f"פתיחת המסחר · {at:%d.%m}, המסחר פתוח", f"כרגע {pct(spx_chg)}"
-elif at.date().weekday() >= 5:
-    monday = at.date() + timedelta(days=7 - at.date().weekday())
-    head = f"פתיחת המסחר · {monday:%d.%m}, סוף שבוע"
-    second = f"סגירה אחרונה {pct(spx_chg)} · {last:%d.%m}"
+    head, second = f"פתיחת המסחר · {now:%d.%m}, המסחר פתוח", f"כרגע {pct(spx_chg)}"
 else:
-    head = f"פתיחת המסחר · {at:%d.%m}, טרם נפתח"
     second = f"סגירה אחרונה {pct(spx_chg)} · {last:%d.%m}"
+    if now.weekday() >= 5:
+        monday = now.date() + timedelta(days=7 - now.weekday())
+        head = f"פתיחת המסחר · {monday:%d.%m}, סוף שבוע"
+    elif last == now.date():
+        head = f"פתיחת המסחר · {last:%d.%m}, המסחר ננעל"
+    else:
+        head = f"פתיחת המסחר · {now:%d.%m}, טרם נפתח"
 
-label, _ = pm.bucket_of(fut)
-name, _, span_text = label.partition(", ")
-row = pm.table(offline=True).set_index("מה קרה לפני הפתיחה").loc[label]
 art = swap(art, r'(?<=font-size:14px;font-weight:700">)פתיחת המסחר · [^<]*', head)
-art = swap(art, r'(?<=padding:4px 12px">)חוזי S&P [^<]*',
-           f"חוזי S&P {pct(fut)} · {at:%H:%M}")
 art = swap(art, r'(?<=padding:4px 12px">)(?:כרגע|סגירה אחרונה) [^<]*', second)
-art = swap(art, r'(?<=font-size:12px;margin-top:8px">)חוזי S&P בשעה [^<]*',
-           f"חוזי S&P בשעה {at:%H:%M} ב-{at:%d.%m}: {pct(fut)}, בקטגוריית "
-           f"{name} ({span_text}). במדגם {int(row['ימים']):,} ימים: "
-           f"‎{row['ירד 2%+ באותו יום']}% נסגרו בירידה של 2% ומעלה, "
-           f"ו-{row['נפילה של 5% ב-20 יום']}% לוו בנפילה של 5% בתוך 20 מפגשים. "
-           "זו השוואה לפערי פתיחה היסטוריים; החוזים עדיין אינם פער הפתיחה "
-           "בפועל. הפרימרקט לא נכנס לציון.")
+
+# A futures print only indicates the next open if it was made after the last
+# session ended. On a Saturday the newest print is Friday's, minutes before
+# that close - quoting it as a gap, with a bucket's hit rate beside it, would
+# read as a claim about Monday that nobody has made. So the strip says there is
+# no reading yet rather than dressing up a close as a premarket.
+if at.date() > last:
+    label, _ = pm.bucket_of(fut)
+    name, _, span_text = label.partition(", ")
+    row = pm.table(offline=True).set_index("מה קרה לפני הפתיחה").loc[label]
+    chip = f"חוזי S&P {pct(fut)} · {at:%H:%M}"
+    told = (f"חוזי S&P בשעה {at:%H:%M} ב-{at:%d.%m}: {pct(fut)}, בקטגוריית "
+            f"{name} ({span_text}). במדגם {int(row['ימים']):,} ימים: "
+            f"‎{row['ירד 2%+ באותו יום']}% נסגרו בירידה של 2% ומעלה, "
+            f"ו-{row['נפילה של 5% ב-20 יום']}% לוו בנפילה של 5% בתוך 20 מפגשים. "
+            "זו השוואה לפערי פתיחה היסטוריים; החוזים עדיין אינם פער הפתיחה "
+            "בפועל. הפרימרקט לא נכנס לציון.")
+else:
+    chip = "חוזי S&P · אין עדיין קריאה"
+    told = (f"הציטוט האחרון של החוזים הוא מ-{at:%d.%m} בשעה {at:%H:%M}, כלומר "
+            f"מתוך מפגש {last:%d.%m} עצמו ולא לפניו — הוא אומר איפה אותו מפגש "
+            "ננעל, לא איפה המפגש הבא ייפתח. פער פתיחה למפגש הבא עדיין אין, "
+            "ולכן גם אין קטגוריה היסטורית להציג. הפרימרקט לא נכנס לציון.")
+art = swap(art, r'(?<=padding:4px 12px">)חוזי S&P [^<]*', chip)
+art = swap(art, r'(?<=font-size:12px;margin-top:8px">)(?:חוזי S&P בשעה|הציטוט האחרון)[^<]*',
+           told)
 
 # ------------------------------------------------- what the sentiment card says
 prev_fear = cards[0][-2]
@@ -300,5 +321,6 @@ print(f"chart {lo}-{hi} base {base} baseline y {ypos(base)} "
       f"last y {ypos(window[-1])} from {start}")
 print(f"gauge arc {arc}  band {band_range} ({band_rate}%, 1 in {round(100 / band_rate)})")
 print(f"market {session}: S&P {spx_chg:+.2f}% VIX {vix:.2f} ({vix_chg:+.1f}%)")
-print(f"futures {fut:+.2f}% at {at:%H:%M} -> {label} ({int(row['ימים'])} days)")
+print(f"futures {fut:+.2f}% at {at:%H:%M}"
+      + (f" -> {label}" if at.date() > last else " (last session, no premarket yet)"))
 print(f"fear {fear:.1f} {mood} · debt {debt:.3f}T · s5fi {s5fi}")
