@@ -25,6 +25,7 @@ Tests — every script carries its own, there is no pytest:
 ```
 python stress.py --selftest
 python premarket.py --selftest
+python yearly.py --selftest
 python eval.py --selftest
 python test_check.py
 python -m unittest test_stress_logic
@@ -45,6 +46,7 @@ CI (`.github/workflows/selftests.yml`) runs all of them on 3.11 and 3.12.
 | `board.py` | The older evidence page (`--full`) |
 | `artifact/` | The shareable page: `page.html` is tracked and hand-designed, `refresh.py` rewrites every number and every worded figure in it, `serve.py` serves it on localhost with a button that reruns the chain |
 | `premarket.py` | The open gap, as context. Separate from the score on purpose |
+| `yearly.py` | The chance of a 20% fall within a year at today's P/E rank, as context. Never in the score |
 | `since2000.py`, `bench_new.py`, `plan_checks.py` | Descriptive comparison, candidate auditions, claims the plan makes |
 
 ## Rules that are not style preferences

@@ -42,6 +42,7 @@ jobs:
       - run: python cvs.py --selftest
       - run: python stress.py --selftest
       - run: python premarket.py --selftest
+      - run: python yearly.py --selftest
       - run: python -m unittest test_stress_logic
       - run: python -m unittest test_website
       - run: python test_check.py

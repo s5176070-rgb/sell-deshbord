@@ -41,6 +41,13 @@ class WebsiteTests(unittest.TestCase):
         self.assertEqual(state["premarket"], premarket)
         self.assertIsNone(state["reading"])
 
+    def test_yearly_context_is_preserved_without_affecting_reading(self) -> None:
+        yearly = {"as_of": "2026-10-30", "pe": 25.9, "percentile": 91.4, "band": "90+",
+                  "chance": 28.6, "baseline": 17.6, "since_1990_share": 55.4}
+        state = payload(website.render(yearly=yearly))
+        self.assertEqual(state["yearly"], yearly)
+        self.assertIsNone(state["reading"])
+
     def test_model_values_and_gaps_are_preserved(self) -> None:
         idx = pd.bdate_range("2024-01-01", periods=3)
         export = pd.DataFrame({"chance_pct": [12.0, None, 25.0],

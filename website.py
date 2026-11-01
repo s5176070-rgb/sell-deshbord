@@ -28,9 +28,9 @@ def render(export: pd.DataFrame | None = None, res: pd.DataFrame | None = None,
            px: pd.DataFrame | None = None, chosen: list[str] | None = None,
            ev: pd.DataFrame | None = None, *, version: str = "",
            live: bool = False, notice: str | None = None,
-           premarket: dict | None = None) -> str:
+           premarket: dict | None = None, yearly: dict | None = None) -> str:
     data: dict = {"version": version, "live": live, "notice": notice,
-                  "premarket": premarket,
+                  "premarket": premarket, "yearly": yearly,
                   "reading": None, "factors": [], "evidence": [], "markets": [],
                   "history": {"chance": [], "mss": [], "spx": []}}
     if export is not None and not export.empty and res is not None:

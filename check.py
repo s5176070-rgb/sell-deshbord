@@ -236,6 +236,18 @@ def fear_line(risk_date: pd.Timestamp, today: pd.Timestamp) -> str | None:
             " — להקשר בלבד, לא בציון")
 
 
+def yearly_line() -> str | None:
+    """The one-year question beside the 20-session one, from yearly.json, dated."""
+    try:
+        y = json.loads((HERE / "yearly.json").read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return (f"שנה קדימה: מכפיל {y['pe']:.1f}, גבוה מ־{y['percentile']:.0f}% מההיסטוריה"
+            f" ({pd.Timestamp(y['as_of']):%d.%m.%Y}) — נפילה של 20% בתוך שנה באה אחרי"
+            f" {y['chance']:.0f}% מהימים ברמה כזו, מול {y['baseline']:.0f}% בכלל הימים"
+            " — להקשר בלבד, לא בציון")
+
+
 def digest_ok(m: dict) -> bool:
     """Do score.csv and score_meta.json come from the same run?"""
     want = m.get("score_sha256")
@@ -256,6 +268,9 @@ def summary(live: bool, verbose: bool = False) -> tuple[dict, str, bool]:
     fear = fear_line(r["date"], now)
     if fear:
         out.append(fear)
+    year = yearly_line()
+    if year:
+        out.append(year)
     return r, "\n".join(out), r["stale_days"] <= MAX_STALE_DAYS
 
 

@@ -20,6 +20,7 @@ cboe_putcall.csv
 debt.csv
 alpha_context.json
 valuation.csv
+yearly.json
 spx.csv
 
 # Windows writes this into any folder you give a custom icon or view to.

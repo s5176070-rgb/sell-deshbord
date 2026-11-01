@@ -10,7 +10,7 @@
 <aside class="sidebar">
   <a class="brand" href="#overview" aria-label="Market Pulse — סקירה"><span class="brandmark">ϟ</span><span dir="ltr">MARKET<span class="brandlight">PULSE</span><small>MARKET STRESS MONITOR</small></span></a>
   <div class="nav-label">סביבת עבודה</div>
-  <nav aria-label="ניווט ראשי"><a href="#overview" class="active"><span>◫</span> סקירת שוק</a><a href="#premarket"><span>◷</span> פרימרקט</a><a href="#history"><span>⌁</span> היסטוריית סיכון</a><a href="#factors"><span>▥</span> גורמי המודל</a><a href="#method"><span>◎</span> איך זה מחושב</a></nav>
+  <nav aria-label="ניווט ראשי"><a href="#overview" class="active"><span>◫</span> סקירת שוק</a><a href="#premarket"><span>◷</span> פרימרקט</a><a href="#yearly"><span>◔</span> שנה קדימה</a><a href="#history"><span>⌁</span> היסטוריית סיכון</a><a href="#factors"><span>▥</span> גורמי המודל</a><a href="#method"><span>◎</span> איך זה מחושב</a></nav>
   <div class="sidebar-note"><span class="eyebrow">טווח המודל</span><strong dir="ltr">S&P 500</strong><p>ירידה של 5% ומעלה<br>ב־20 מפגשי המסחר הבאים</p><div class="scope-line"><span>שוק</span><b>ארצות הברית</b></div><div class="scope-line"><span>נתונים</span><b>סגירה יומית</b></div></div>
   <div class="sidebar-bottom"><span class="model-dot"></span> מודל MSS <b id="version" dir="ltr"></b><p>הערכת סיכון מבוססת נתונים</p></div>
 </aside>
@@ -28,6 +28,15 @@
       <article class="pm-history"><span id="pm-history-title">הקשר היסטורי</span><div><b id="pm-days">—</b><small>ימים דומים</small></div><div><b id="pm-same-day">—</b><small>ירידה של 2%+ באותו יום</small></div><div><b id="pm-next20">—</b><small>נפילה של 5% בתוך 20 מפגשים</small></div></article>
     </div>
     <div class="pm-foot"><span id="pm-source">מקור: לא זמין</span><span>נתון הקשר בלבד — אינו נכנס לציון MSS</span></div>
+  </section>
+  <section id="yearly" class="premarket-panel" aria-labelledby="yearly-title">
+    <div class="pm-head"><div><div class="eyebrow">טווח ארוך</div><h2 id="yearly-title">סיכון לשנה קדימה</h2></div><div class="pm-state"><span id="yr-band" class="badge">לא זמין</span><span id="yr-asof" class="pm-fresh">—</span></div></div>
+    <div class="pm-grid">
+      <article class="pm-quote"><span>נפילה של 20% בתוך שנה</span><strong id="yr-chance" dir="ltr">—</strong><small>מהימים שבהם המכפיל היה ברמה כזו</small></article>
+      <article class="pm-quote"><span>שיעור הבסיס</span><strong id="yr-base" dir="ltr">—</strong><small id="yr-from">כל הימים</small></article>
+      <article class="pm-history"><span>מכפיל רווח נגרר של S&amp;P 500</span><div><b id="yr-pe" dir="ltr">—</b><small>המכפיל היום</small></div><div><b id="yr-pct" dir="ltr">—</b><small>גבוה מחלק זה של ההיסטוריה</small></div><div><b id="yr-since" dir="ltr">—</b><small>מהימים מאז 1990 באותה רמה</small></div></article>
+    </div>
+    <div class="pm-foot"><span>מכפיל גבוה לא אומר מתי: בשנות ה־90 הוא נשאר גבוה שנים בלי נפילה כזו.</span><span>נתון הקשר בלבד — אינו נכנס לציון MSS</span></div>
   </section>
   <div class="overview-grid">
     <article class="risk-card"><div class="card-top"><span class="eyebrow">הערכת הסיכון הנוכחית</span><span id="regime" class="badge">ממתין לחישוב</span></div><div class="risk-main"><div><div class="risk-number" dir="ltr"><span id="chance">—</span><span class="percent">%</span></div><p class="risk-caption">סיכוי לירידה של לפחות 5%</p><span class="muted">ב־20 מפגשי המסחר הבאים</span></div><svg class="risk-orbit" viewBox="0 0 140 140" aria-hidden="true"><circle cx="70" cy="70" r="56" class="orbit-track"/><circle id="orbit" cx="70" cy="70" r="56" class="orbit-value"/><path d="M38 73h18l9-24 14 43 10-19h13" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg></div><div class="risk-comparison"><span>שיעור הבסיס ההיסטורי <b id="baseline" dir="ltr">—</b></span><b id="relative">טרם חושב</b></div><div class="reading-date">תאריך הקריאה <span id="asof">טרם חושב</span></div></article>

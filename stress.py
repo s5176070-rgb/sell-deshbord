@@ -1021,10 +1021,18 @@ def build(a, live: bool = False) -> str | None:
         premarket_data = premarket_context.snapshot()
     except Exception as exc:
         print(f"premarket unavailable this run: {type(exc).__name__}", file=sys.stderr)
+    # The one-year question beside the 20-session one. Context like the
+    # premarket gap: shown, never scored (see yearly.py).
+    yearly_data = None
+    try:
+        import yearly
+        yearly_data = yearly.snapshot()
+    except Exception as exc:
+        print(f"one-year context unavailable this run: {type(exc).__name__}", file=sys.stderr)
     return website.render(export, res, px, chosen, ev, version=MODEL_VERSION,
                           live=live, notice=("מוצג היום האחרון עם כיסוי נתונים מספיק."
                                             if held_back else None),
-                          premarket=premarket_data)
+                          premarket=premarket_data, yearly=yearly_data)
 
 
 def reanalyse(a, state, note) -> None:

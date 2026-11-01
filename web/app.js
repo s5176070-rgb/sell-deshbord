@@ -48,3 +48,16 @@ function lock(value){busy=value;$('refresh').disabled=value;$('analyze').disable
 async function status(){try{const r=await fetch('/status',{cache:'no-store'});if(!r.ok)throw new Error('status');const s=await r.json();if(s.running){lock(true);jobMessage('החישוב מתבצע. איסוף הנתונים עשוי להימשך מספר דקות.');pollTimer=setTimeout(status,2000);}else if(busy){lock(false);if(s.error)jobMessage('החישוב לא הושלם. הקריאה הקודמת נשמרה. אפשר לנסות שוב.',true);else location.reload();}}catch{lock(false);jobMessage('החיבור לשרת נותק. יש לבדוק שהשרת פועל ולנסות שוב.',true);}}
 async function run(path){if(busy)return;lock(true);jobMessage(path==='/analyze'?'אוסף נתונים ומחשב מחדש את המודל…':'מרענן מחירים ומחשב את הקריאה…');try{const r=await fetch(path,{method:'POST'});if(!r.ok){if(r.status===409){jobMessage('כבר מתבצע חישוב. ממתין לסיום…');pollTimer=setTimeout(status,1500);return;}throw new Error('update');}if(r.status===202)pollTimer=setTimeout(status,1500);else location.reload();}catch{lock(false);jobMessage('לא ניתן להשלים את הרענון. הנתונים הקודמים נשמרו; אפשר לנסות שוב.',true);}}
 $('refresh').addEventListener('click',()=>run('/refresh'));$('analyze').addEventListener('click',()=>run('/analyze'));if(data.live)status();
+(function renderYearly(){
+  const y=data.yearly;
+  if(!y)return;
+  const date=iso=>iso.split('-').reverse().join('.');
+  $('yr-band').textContent=`P/E · ${y.band}`;
+  $('yr-asof').textContent=`מכפיל נכון ל־${date(y.as_of)}`;
+  $('yr-chance').textContent=fmt(y.chance)+'%';
+  $('yr-base').textContent=fmt(y.baseline)+'%';
+  $('yr-from').textContent=`כל הימים מאז ${y.history_from.slice(0,4)}`;
+  $('yr-pe').textContent=fmt(y.pe);
+  $('yr-pct').textContent=fmt(y.percentile,0)+'%';
+  $('yr-since').textContent=fmt(y.since_1990_share,0)+'%';
+})();
