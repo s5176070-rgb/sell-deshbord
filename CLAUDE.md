@@ -43,6 +43,7 @@ CI (`.github/workflows/selftests.yml`) runs all of them on 3.11 and 3.12.
 | `check.py` | Reads `score.csv` and prints the Hebrew reading. Never recomputes |
 | `website.py` + `web/` | The Hebrew page, rendered from model output without rescoring |
 | `board.py` | The older evidence page (`--full`) |
+| `artifact/` | The shareable page: `page.html` is tracked and hand-designed, `refresh.py` rewrites every number and every worded figure in it, `serve.py` serves it on localhost with a button that reruns the chain |
 | `premarket.py` | The open gap, as context. Separate from the score on purpose |
 | `since2000.py`, `bench_new.py`, `plan_checks.py` | Descriptive comparison, candidate auditions, claims the plan makes |
 
