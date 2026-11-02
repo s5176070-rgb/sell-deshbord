@@ -1,5 +1,10 @@
 # Market Stress Dashboard
 
+Version 2026.09c (2026-09-12) fixes causal feature ranking, historical score
+export and event-window handling. Performance figures below predate these
+fixes and require regeneration; they do not validate the current version.
+See [LOGIC_REVIEW.md](LOGIC_REVIEW.md).
+
 A score that says how likely the next twenty sessions are to contain a 5% fall,
 and — more importantly — the evidence for whether that score is worth reading.
 
@@ -8,6 +13,23 @@ that failed is still in the repo, because knowing what didn't work is most of
 what makes the current number believable.
 
 ## Run it
+
+The default dashboard is now the responsive Hebrew Market Pulse website.
+It includes calibrated risk, raw MSS, interactive historical charts, selected
+factors, historical event rates, and the existing refresh/re-analysis controls.
+`website.py` renders the assets in `web/` into one self-contained HTML document.
+
+For an immediate local start from the existing SPX price file:
+
+```
+python stress.py --serve --preview --no-open
+```
+
+Open http://127.0.0.1:8765. This mode calculates on demand; it does not run the
+daily schedule. A missing model reading is shown explicitly. Refresh downloads
+prices and calculates the model; full analysis also rebuilds optional inputs.
+Without `--preview`, the usual initial calculation and daily schedule apply.
+`--full` retains the previous detailed evidence page.
 
 ```
 pip install -r requirements.txt
@@ -88,6 +110,17 @@ curl -X POST http://127.0.0.1:8765/analyze              REM full re-analysis now
 del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Market Stress Server.lnk"
 ```
 
+On the Mac, `mac/install.sh` builds the venv and loads a launchd agent
+(*com.yoni.market-stress*) that runs `mac/serve.sh` at login and restarts it if
+it falls over — the same contract as `serve.bat`, exit 3 included. A Mac
+honours the port bind, but the probe still answers first.
+
+```
+tail daily.log                                                  # what it did
+curl -X POST http://127.0.0.1:8765/analyze                      # full re-analysis now
+launchctl bootout gui/$(id -u)/com.yoni.market-stress           # stop it until next login
+```
+
 ## What each file does
 
 | File | Job |
@@ -100,6 +133,7 @@ del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Market Stress Serve
 | `cvs.py` | The first model. It failed. Kept as the record, and for its data helpers |
 | `patches.csv` | Closes a feed stopped publishing, with the source of each one. The fallback under CBOE, not the first stop — see Known limits |
 | `serve.bat` | Starts the server at logon; the server does the daily run itself |
+| `mac/install.sh`, `mac/serve.sh` | The same on a Mac, as a launchd agent |
 | `.github/workflows/selftests.yml` | Runs every `--selftest` on push and on a pull request |
 
 ## The one rule

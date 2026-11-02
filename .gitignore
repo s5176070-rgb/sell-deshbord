@@ -1,13 +1,16 @@
 # The API key. First entry on purpose: `.env` is the one file here that must
 # never leave this machine, and a key committed once stays in the history.
 .env
+.env.local
 
 # Generated. Every one of these is rebuilt by running the scripts.
 dashboard*.html
 score.csv
+score_meta.json
 *.log
 .last_analysis
 __pycache__/
+.venv/
 *.pyc
 
 # Gathered data. Cheap to rebuild, and breadth.csv is ~160KB of numbers that
@@ -18,7 +21,20 @@ cboe_putcall.csv
 debt.csv
 alpha_context.json
 valuation.csv
+yearly.json
+spx.csv
 
-# Windows writes this into any folder you give a custom icon or view to.
+# Windows writes this into any folder you give a custom icon or view to;
+# macOS writes the second into every folder Finder opens.
 desktop.ini
+.DS_Store
 fear.csv
+
+# The motion project keeps its engine, fonts and renders as copies from the
+# skill; only the scene and its settings are ours to track.
+motion-*/core.js
+motion-*/render.py
+motion-*/audio.py
+motion-*/fonts/
+motion-*/out/
+motion-*/stills/
