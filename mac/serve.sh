@@ -9,6 +9,10 @@ if [ ! -x "$PY" ]; then
   echo "ERROR: local Python environment not found at $PY - run mac/install.sh" >> daily.log
   exit 2
 fi
+# ponytail: macOS gives launchd jobs 256 open files; yfinance keeps a tz-cache
+# handle per thread and the re-analysis ran out (Errno 24, 2026-11-02). 4096 is
+# room, not a fix: find the handle leak if it ever reaches this too.
+ulimit -n 4096
 export PYTHONIOENCODING=utf-8
 echo >> daily.log
 echo "==== server start $(date)" >> daily.log
