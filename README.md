@@ -110,6 +110,17 @@ curl -X POST http://127.0.0.1:8765/analyze              REM full re-analysis now
 del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Market Stress Server.lnk"
 ```
 
+On the Mac, `mac/install.sh` builds the venv and loads a launchd agent
+(*com.yoni.market-stress*) that runs `mac/serve.sh` at login and restarts it if
+it falls over — the same contract as `serve.bat`, exit 3 included. A Mac
+honours the port bind, but the probe still answers first.
+
+```
+tail daily.log                                                  # what it did
+curl -X POST http://127.0.0.1:8765/analyze                      # full re-analysis now
+launchctl bootout gui/$(id -u)/com.yoni.market-stress           # stop it until next login
+```
+
 ## What each file does
 
 | File | Job |
@@ -122,6 +133,7 @@ del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Market Stress Serve
 | `cvs.py` | The first model. It failed. Kept as the record, and for its data helpers |
 | `patches.csv` | Closes a feed stopped publishing, with the source of each one. The fallback under CBOE, not the first stop — see Known limits |
 | `serve.bat` | Starts the server at logon; the server does the daily run itself |
+| `mac/install.sh`, `mac/serve.sh` | The same on a Mac, as a launchd agent |
 | `.github/workflows/selftests.yml` | Runs every `--selftest` on push and on a pull request |
 
 ## The one rule

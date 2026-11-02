@@ -13,6 +13,7 @@ python check.py --json           # same numbers, machine-readable
 python stress.py                 # full rebuild: score.csv + dashboard page
 python stress.py --serve --no-open          # the page on 127.0.0.1:8765, daily schedule
 python stress.py --serve --preview --no-open # same page from saved prices, no schedule
+bash mac/install.sh              # Mac: venv + launchd agent that keeps --serve up
 python premarket.py              # the open gap now, and what gaps that size preceded
 python eval.py                   # Brier, AUC, reliability on the published history
 ```
