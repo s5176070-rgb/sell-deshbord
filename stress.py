@@ -97,6 +97,20 @@ MARKET_TZ = "America/New_York"
 # any zone and move between them, but the close does not.
 DAILY_AT = 17
 STAMP = Path(__file__).with_name(".last_analysis")
+LOCAL_HOSTS = Path(__file__).with_name("allowed_hosts.txt")
+
+
+def allowed_hosts() -> list[str]:
+    """Имена этой машины в частной сети, по одному на строку.
+
+    Файл не попадает в git, потому что репозиторий публичный. Нет файла, значит
+    кнопки работают только с самого компьютера.
+    """
+    try:
+        lines = LOCAL_HOSTS.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
 
 
 def candidates(px: pd.DataFrame, br: pd.DataFrame | None = None,
@@ -1201,6 +1215,10 @@ def serve(a, port: int) -> int:
                 print(f"clock: {exc}", file=sys.stderr, flush=True)
             time.sleep(300)
 
+    # Имена перечислены явно: сравнение с заголовком Host пропустило бы сайт,
+    # который подменяет DNS на этот адрес.
+    origins = {f"http://{host}:{port}" for host in ["127.0.0.1", "localhost", *allowed_hosts()]}
+
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code: int, body: bytes, kind: str = "text/html; charset=utf-8"):
             self.send_response(code)
@@ -1221,7 +1239,7 @@ def serve(a, port: int) -> int:
 
         def do_POST(self):
             origin = self.headers.get("Origin")
-            if origin and origin not in {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}:
+            if origin and origin not in origins:
                 self._send(403, b"cross-origin updates are not allowed", "text/plain")
                 return
             if self.path == "/analyze":

@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import http.client
 import http.server
+import tempfile
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -73,6 +75,14 @@ class WebsiteTests(unittest.TestCase):
         for value in [float("nan"), float("inf"), -float("inf"), None, pd.NA]:
             self.assertIsNone(website.number(value))
 
+    def test_allowed_hosts_reads_local_file_and_survives_its_absence(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "allowed_hosts.txt"
+            with patch.object(stress, "LOCAL_HOSTS", path):
+                self.assertEqual(stress.allowed_hosts(), [])
+                path.write_text("# note\n\n one.example \ntwo.example\n", encoding="utf-8")
+                self.assertEqual(stress.allowed_hosts(), ["one.example", "two.example"])
+
     def test_server_rejects_overlapping_updates_and_keeps_page_on_failure(self) -> None:
         ready, started, release = threading.Event(), threading.Event(), threading.Event()
         servers: list[http.server.ThreadingHTTPServer] = []
@@ -100,6 +110,7 @@ class WebsiteTests(unittest.TestCase):
         args = SimpleNamespace(preview=True, no_open=True)
         with patch.object(http.server, "ThreadingHTTPServer", TestServer), \
              patch.object(website, "cached_page", return_value="last good reading"), \
+             patch.object(stress, "allowed_hosts", return_value=["phone.example"]), \
              patch.object(stress, "build", side_effect=failing_build):
             worker = threading.Thread(target=stress.serve, args=(args, 0), daemon=True)
             worker.start()
@@ -108,6 +119,10 @@ class WebsiteTests(unittest.TestCase):
             refresh = threading.Thread(target=lambda: first.append(request("POST", "/refresh")))
             try:
                 self.assertEqual(request("POST", "/refresh", "https://unrelated.example")[0], 403)
+                self.assertEqual(request("POST", "/refresh", "http://unrelated.example:0")[0], 403)
+                # Имя из локального файла проходит проверку и доходит до маршрута.
+                self.assertEqual(request("POST", "/missing", "http://phone.example:0")[0], 404)
+                self.assertEqual(request("POST", "/missing", "http://localhost:0")[0], 404)
                 refresh.start()
                 self.assertTrue(started.wait(5))
                 self.assertEqual(request("POST", "/analyze")[0], 409)

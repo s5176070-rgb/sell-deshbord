@@ -3,6 +3,9 @@
 .env
 .env.local
 
+# Имена этой машины в частной сети. Репозиторий публичный.
+allowed_hosts.txt
+
 # Generated. Every one of these is rebuilt by running the scripts.
 dashboard*.html
 score.csv
