@@ -120,7 +120,7 @@ class WebsiteTests(unittest.TestCase):
             try:
                 self.assertEqual(request("POST", "/refresh", "https://unrelated.example")[0], 403)
                 self.assertEqual(request("POST", "/refresh", "http://unrelated.example:0")[0], 403)
-                # Имя из локального файла проходит проверку и доходит до маршрута.
+                # A name from the local file passes the origin check and reaches routing.
                 self.assertEqual(request("POST", "/missing", "http://phone.example:0")[0], 404)
                 self.assertEqual(request("POST", "/missing", "http://localhost:0")[0], 404)
                 refresh.start()

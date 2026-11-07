@@ -3,7 +3,7 @@
 .env
 .env.local
 
-# Имена этой машины в частной сети. Репозиторий публичный.
+# This machine's names on the private network. The repository is public.
 allowed_hosts.txt
 
 # Generated. Every one of these is rebuilt by running the scripts.

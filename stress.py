@@ -101,10 +101,10 @@ LOCAL_HOSTS = Path(__file__).with_name("allowed_hosts.txt")
 
 
 def allowed_hosts() -> list[str]:
-    """Имена этой машины в частной сети, по одному на строку.
+    """This machine's names on the private network, one per line.
 
-    Файл не попадает в git, потому что репозиторий публичный. Нет файла, значит
-    кнопки работают только с самого компьютера.
+    The file stays out of git because the repository is public. Without it the
+    buttons work only from this computer.
     """
     try:
         lines = LOCAL_HOSTS.read_text(encoding="utf-8").splitlines()
@@ -1215,8 +1215,8 @@ def serve(a, port: int) -> int:
                 print(f"clock: {exc}", file=sys.stderr, flush=True)
             time.sleep(300)
 
-    # Имена перечислены явно: сравнение с заголовком Host пропустило бы сайт,
-    # который подменяет DNS на этот адрес.
+    # Names are listed explicitly: comparing against the Host header would let in
+    # a site that rebinds its DNS to this address.
     origins = {f"http://{host}:{port}" for host in ["127.0.0.1", "localhost", *allowed_hosts()]}
 
     class Handler(BaseHTTPRequestHandler):
