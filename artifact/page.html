@@ -15,10 +15,6 @@
 <style>
   :root { color-scheme: light; }
   body { background: #f6f1e6; color: #2a2823; }
-  .card { transition: box-shadow .25s ease, transform .25s ease; }
-  @media (hover: hover) {
-    .card:hover { box-shadow: 0 6px 18px rgba(60,50,20,0.09); transform: translateY(-2px); }
-  }
   @media (max-width: 640px) {
     .sheet { padding: 16px !important; gap: 14px !important; }
     .card { padding: 16px 15px; border-radius: 16px; }
@@ -38,11 +34,11 @@
 
   /* The ring fills to the published probability. */
   @keyframes sweep { from { stroke-dashoffset: 260.1; } to { stroke-dashoffset: 0; } }
-  .gauge-arc { animation: sweep 1.1s cubic-bezier(.22,1,.36,1) .15s both; }
+  .gauge-arc { animation: sweep .5s cubic-bezier(.23,1,.32,1) .15s both; }
 
   /* The six-month line draws left to right; 4000 clears its own length. */
   @keyframes draw { from { stroke-dashoffset: 4000; } to { stroke-dashoffset: 0; } }
-  polyline[stroke-width="2.6"] { stroke-dasharray: 4000; animation: draw 1.5s ease-out .2s both; }
+  polyline[stroke-width="2.6"] { stroke-dasharray: 4000; animation: draw .6s cubic-bezier(.23,1,.32,1) both; }
 
   /* The bars grow out of the baseline they are measured from. */
   @keyframes grow { from { transform: scaleY(0); } }
@@ -55,7 +51,6 @@
     .sheet > *, .gauge-arc, polyline[stroke-width="2.6"],
     svg[viewBox="0 0 760 190"] rect[width="140"] { animation: none; }
     polyline[stroke-width="2.6"] { stroke-dasharray: none; }
-    .card { transition: none; }
   }
 </style>
 <div class="sheet" dir="rtl" lang="he" style="font-family:'Rubik',system-ui,Arial,sans-serif;background:#f6f1e6;color:#2a2823;width:100%;max-width:1080px;margin:0 auto;padding:32px;display:flex;flex-direction:column;gap:18px">
