@@ -10,6 +10,11 @@ numpy>=1.26
 requests>=2.31
 lxml>=5.2
 
+# valuation.py reads Shiller's ie_data.xls. calamine rather than xlrd because
+# pandas 3.1 marks its xlrd engine deprecated; calamine has wheels for every
+# Python this runs on (3.11, 3.12 in CI, 3.15 on the Mac, checked 2026-11-28).
+python-calamine>=0.2
+
 # alpha.py talks to Alpha Vantage over plain HTTP - requests again, no SDK.
 
 # Deliberately absent:

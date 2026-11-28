@@ -81,19 +81,20 @@ def compute(pe: pd.Series, px: pd.Series, horizon: int = HORIZON) -> dict:
 
 
 def snapshot() -> dict:
-    """Recompute from multpl and Yahoo, write yearly.json, return it.
+    """Recompute from Shiller's data and Yahoo, write yearly.json, return it.
 
     The P/E is fetched fresh rather than read from valuation.csv: nothing in the
     daily run rebuilds that file, and on 2026-11-01 it was two months behind.
     It is not written back - the score's own feed changes only when
-    `python valuation.py` is run.
+    `python valuation.py` is run. Today's P/E is the latest close over the
+    latest trailing earnings (see valuation.parse).
     """
     import yfinance as yf
-    val = valuation.fetch()
     px = yf.download("^GSPC", start=PRICES_FROM, auto_adjust=True, progress=False)["Close"]
     px = px.squeeze().dropna()
     if len(px) < HORIZON * 20:
         raise RuntimeError(f"only {len(px)} S&P 500 closes since {PRICES_FROM}")
+    val = valuation.fetch(latest=px)
     out = compute(val["pe"], px)
     JSON.write_text(json.dumps(out, indent=1), encoding="utf-8")
     return out
